@@ -1,0 +1,174 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  STAND DE DEGUSTACIÓN — umbrales y zonas
+# ═══════════════════════════════════════════════════════════════════════
+#
+#  Regla del proyecto: NINGÚN umbral vive en el código. Todo se lee de aquí.
+#  Cada valor lleva su rango recomendado y qué pasa si te sales de él.
+#
+#  Los valores de arranque son los del Anexo A de la especificación. NO están
+#  validados todavía contra vídeo real: el HITO 13 los ajusta contra ground
+#  truth y deja constancia de cada iteración. Hasta entonces son un punto de
+#  partida razonable, no una verdad medida.
+#
+#  Zonas: se rellenan con la herramienta de calibración del HITO 3. Mientras
+#  estén vacías, el módulo NO cuenta nada (falla explícito, no en silencio).
+# ═══════════════════════════════════════════════════════════════════════
+
+# OBSOLETO desde el 5-ago-2026: el stand tiene su propio pipeline
+# (`AmazonasStand`), así que lo que lo habilita es ELEGIR ESE MODO en el
+# cliente, no este flag.
+#
+# Existía cuando el módulo se enganchaba dentro de `Personal de Amazonas`, y
+# ahí fue justo el problema: ese pipeline lo comparte el cliente de Tienda, de
+# modo que encender el flag hizo que Tienda abriera sesiones y contara
+# visitantes de un stand que no está midiendo.
+#
+# Solo lo sigue leyendo `crear_si_habilitado()`, que ya no usa nadie en
+# produccion. Se conserva para no romper esa función ni sus pruebas.
+habilitado: true
+
+stand:
+  # 7-ago-2026: el stand medido HOY es el de Finca Dos Aguas (canal
+  # "Camera 01"), no la charcutería del 5-ago ("Camera 04"): el operador
+  # cambió la vista de iVMS-4200. Cambiar el stand_id abre una jornada
+  # nueva y limpia — los datos de la sesión de la charcutería quedaron
+  # medidos con zonas de otra escena y no sirven de referencia.
+  stand_id: "finca-dos-aguas-01"
+  nombre: "Stand de degustación — Finca Dos Aguas"
+  producto: "Degustación Finca Dos Aguas"
+  # Cámara tal como la identifica el pipeline (device_id del cliente).
+  camara_id: "win-iVMS-4200"
+  # Canal dentro de la ventana iVMS-4200. Solo informativo/trazabilidad.
+  canal: "Camera 01"
+
+# ── DETECCIÓN ────────────────────────────────────────────────────────────
+deteccion:
+  conf: 0.35          # [0.25–0.50] Bajar sube recall y falsos positivos.
+  imgsz: 960          # [640–1280] 960 equilibra personas al fondo vs FPS.
+  clase: person
+
+# ── TRACKING ─────────────────────────────────────────────────────────────
+tracking:
+  tipo: bytetrack
+  track_buffer_s: 3.0   # [1.5–5.0] Cuánto sobrevive un track sin verse.
+                        # Subirlo tolera oclusión por el mostrador, pero
+                        # aumenta el riesgo de heredar el ID a otra persona.
+  match_thresh: 0.8     # [0.7–0.9]
+
+# ── RE-ID / IDENTIDAD PERSISTENTE ────────────────────────────────────────
+# GOTCHA medido en el repo: el detector de ByteTrack añade +0.1 al umbral
+# efectivo. Ver memoria "Umbrales del detector MEDIDOS".
+reid:
+  umbral_merge: 0.78          # [0.72–0.85] Similitud coseno para fusionar.
+                              # Bajarlo funde personas distintas (subconteo);
+                              # subirlo parte a una persona en dos (sobreconteo).
+  umbral_merge_ventana: 0.65  # [0.60–0.72] Umbral relajado, SOLO dentro de
+                              # ventana_reentrada_s y en zona compatible.
+  ventana_reentrada_s: 120
+  ttl_galeria_min: 45         # La galería es efímera: es una sesión, no un
+                              # registro biométrico permanente (regla 7).
+
+# ── CONTEO (anti-doble-conteo) ───────────────────────────────────────────
+conteo:
+  min_frames_track: 10        # [10–30] Un track más corto NO cuenta como
+                              # persona: casi siempre es un falso positivo.
+                              # 7-ago-2026: bajado de 15 a 10 MEDIDO contra
+                              # la jornada real — tracks legítimos de 4-5 s
+                              # caían descartados 'track_corto' porque el
+                              # pipeline procesa esta cámara a ~2-3 FPS
+                              # efectivos (15 frames ≈ 6 s, más de lo que
+                              # tarda alguien en cruzar el pasillo).
+  min_dwell_zona_paso_s: 1.0
+  # Permanencia mínima en zona_stand que también GANA el conteo. Antes solo
+  # contaban línea o zona_paso: quien llegaba al stand por el frente sin
+  # pisar el pasillo se descartaba 'nunca_en_zona' aunque se hubiera
+  # detenido 3 s frente al mostrador (visto en la sesión del 7-ago: un
+  # visitante con detención registrada y descartado). Mismo criterio que
+  # el pasillo.
+  min_dwell_zona_stand_s: 1.0
+  # El conteo se hace SIEMPRE por persistent_id. Ver AUDITORIA_STAND.md §4:
+  # `total_entradas` se infla con las reentradas y NO sirve de denominador.
+
+# ── DETENCIÓN ────────────────────────────────────────────────────────────
+detencion:
+  dwell_min_s: 3.0            # [2.0–5.0] Menos de 3 s frente al stand es
+                              # tránsito, no interés.
+  desplazamiento_max_m: 0.8   # Se usa si hay homografía.
+  desplazamiento_max_px: 60   # Fallback sin homografía. Depende de la
+                              # resolución: recalibrar si cambia la cámara.
+
+paso_largo:
+  velocidad_min_ms: 0.6
+
+# ── ATENCIÓN (cliente ↔ chef) ────────────────────────────────────────────
+atencion:
+  distancia_max_m: 1.2        # Con homografía.
+  duracion_min_s: 2.0         # Acumulados, no consecutivos: el chef se gira
+                              # a cortar y vuelve — sigue siendo una atención.
+
+# ── DEGUSTACIÓN ──────────────────────────────────────────────────────────
+degustacion:
+  pose:
+    ratio_muneca_boca: 0.35   # Distancia muñeca→boca normalizada por ancho
+                              # de cabeza. [0.25–0.45]
+    frames_min: 8             # No consecutivos, dentro de ventana_s.
+    ventana_s: 2.0
+    angulo_codo_max: 120.0    # Grados. 180 = brazo estirado, que no puede
+                              # estar llevando nada a la boca. [100–140]
+                              # No estaba en el Anexo A: lo pedía la propia
+                              # spec ("con codo flexionado") sin dar valor.
+  ventana_post_atencion_s: 90 # Sólo se busca degustación en esta ventana
+                              # tras la atención: acota coste y falsos +.
+  vlm:
+    confianza_min: 0.7        # [0.6–0.85] Es el dial precisión/recall de la
+                              # métrica más importante del sistema.
+    max_por_minuto: 20        # Tope de coste. Al saturar se ENCOLA, nunca
+                              # se descarta (perder una degustación sesga).
+
+# ── DEMOGRAFÍA ───────────────────────────────────────────────────────────
+# OJO: los DEMO_* globales del servidor están calibrados a precisión máxima
+# y producen null-rate alto a propósito (ver AUDITORIA_STAND.md §3). Estos
+# valores son los OVERRIDES del stand, donde preferimos recall: es mejor
+# saber que pasaron 100 personas con género de 80, que 40 con género de 40.
+demografia:
+  facial:
+    bbox_min_px: 40
+    det_score_min: 0.60
+  buffer:
+    max_muestras: 10
+    espaciado_frames: 5
+    min_muestras_validas: 3
+  genero:
+    confianza_min: 0.65       # vs 0.85 global. Recall sobre precisión.
+  # Si el visitante se cuenta aunque NO tenga demografía. Debe ser true:
+  # desacoplar "contar" de "saber quién era" es el fix del hallazgo §3.2.
+  contar_sin_demografia: true
+
+# ── MAPA DE CALOR ────────────────────────────────────────────────────────
+heatmap:
+  celda_px: 20
+  sigma_celdas: 2
+  snapshot_s: 30
+
+# ── PERSONAL / CHEF ──────────────────────────────────────────────────────
+personal:
+  dwell_auto_enrolamiento_min: 10  # Propone (no confirma) como personal.
+  umbral_reid: 0.75
+
+# ── ZONAS (HITO 3 — las rellena la herramienta de calibración) ───────────
+# Polígonos en píxeles sobre el frame que procesa el pipeline. VACÍO = el
+# módulo no cuenta y lo dice en el log; nunca asume una zona por defecto.
+zonas:
+  zona_paso: []        # Corredor peatonal. Denominador de "pasaron".
+  zona_stand: []       # Área de influencia frente al mostrador.
+  zona_atencion: []    # Subárea inmediata donde ocurre la interacción.
+  zona_personal: []    # Detrás del mostrador: donde se para el chef.
+  linea_conteo: []     # [[x1,y1],[x2,y2]] + dirección, para flujo direccional.
+
+# Homografía opcional: 4 puntos del piso con sus medidas reales, para pasar
+# de píxeles a metros. Sin ella se usan los umbrales *_px y se documenta la
+# limitación (HITO 3).
+homografia:
+  activa: false
+  puntos_imagen: []    # [[x,y] x4]
+  puntos_mundo_m: []   # [[X,Y] x4] en metros

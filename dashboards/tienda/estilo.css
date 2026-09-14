@@ -1,0 +1,268 @@
+/* dashboards/tienda/estilo.css — SOLO lo propio de tienda (13-ago-2026).
+ * El rediseño común vive en shared/moderno.css; aquí quedan el acento del
+ * dominio y los componentes del bloque de Anaqueles. */
+
+:root {
+  --acento: #00c8ff;
+  --naranja: #ffa028;          /* agarres / calor de anaquel, SIEMPRE este */
+}
+
+.kpi.naranja::before { background: var(--naranja); }
+.kpi.naranja .valor { color: var(--naranja); }
+
+/* ── Anaqueles ──────────────────────────────────────────────────────── */
+.anq-camaras { display: grid; gap: 1rem; }
+.anq-camara {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: 1rem 1.2rem;
+}
+.anq-camara > h3 {
+  font-size: .95rem;
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-bottom: .8rem;
+}
+.anq-camara > h3 .fecha { color: var(--apagado); font-size: .78rem; font-weight: 400; }
+.anq-camara > h3 .totales { margin-left: auto; color: var(--apagado); font-size: .8rem; font-weight: 400; }
+.anq-camara > h3 .totales b { color: var(--naranja); }
+
+.anq-fila {
+  display: grid;
+  grid-template-columns: minmax(10rem, 16rem) 1fr auto auto;
+  gap: 1rem;
+  align-items: center;
+  padding: .55rem .2rem;
+  border-top: 1px solid var(--borde);
+}
+.anq-fila:first-of-type { border-top: none; }
+.anq-nombre { font-size: .88rem; }
+.anq-nombre .pos {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  font-size: .75rem;
+  font-weight: 700;
+  margin-right: .5rem;
+  font-variant-numeric: tabular-nums;
+}
+.anq-fila.top .anq-nombre .pos { background: var(--naranja); color: #201200; }
+.anq-medidas { display: grid; gap: .3rem; min-width: 0; }
+.anq-medida {
+  display: grid;
+  grid-template-columns: 4.2rem 1fr 3.5rem;
+  gap: .6rem;
+  align-items: center;
+  font-size: .76rem;
+  color: var(--apagado);
+}
+.anq-medida .pista { background: rgba(255,255,255,.05); border-radius: 5px; height: 9px; overflow: hidden; }
+.anq-medida .relleno { height: 100%; border-radius: 5px 4px 4px 5px; min-width: 2px; }
+.anq-medida.agarres .relleno { background: var(--naranja); }
+.anq-medida.visitas .relleno { background: var(--acento); }
+.anq-medida .cifra { text-align: right; color: var(--texto); font-variant-numeric: tabular-nums; }
+.anq-conversion { text-align: center; font-size: .78rem; color: var(--apagado); }
+.anq-conversion b { display: block; font-size: 1.05rem; color: var(--texto); font-variant-numeric: tabular-nums; }
+.anq-heat {
+  cursor: zoom-in;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  background: #0a0d12;
+  padding: 3px;
+  transition: border-color .15s;
+}
+.anq-heat:hover { border-color: var(--naranja); }
+.anq-heat canvas { display: block; border-radius: 5px; }
+.anq-heat .sin { display: grid; place-items: center; width: 132px; height: 66px; color: var(--apagado); font-size: .7rem; }
+
+@media (max-width: 720px) {
+  .anq-fila { grid-template-columns: 1fr auto; }
+  .anq-medidas { grid-column: 1 / -1; }
+}
+
+/* ── Personal de la tienda ──────────────────────────────────────────── */
+.pers-alta { margin-bottom: .9rem; }
+.pers-form { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.pers-form input[type="text"],
+.pers-form select,
+.pers-form input[type="file"] {
+  background: var(--fondo);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 999px;              /* al estilo chip de moderno.css */
+  padding: .38rem .85rem;
+  font-size: .84rem;
+  font-family: inherit;
+  color-scheme: dark;
+}
+.pers-form input[type="text"] { min-width: 13rem; }
+.pers-form input[type="text"]:focus,
+.pers-form select:focus { outline: none; border-color: var(--acento); }
+.pers-form input[type="file"] { max-width: 16rem; color: var(--apagado); }
+.pers-form input[type="file"]::file-selector-button {
+  background: var(--panel);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  padding: .2rem .7rem;
+  margin-right: .6rem;
+  font-family: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+}
+.pers-form .boton { border-radius: 999px; }
+#pers-refrescar { padding: .38rem .6rem; }
+.pers-form .pers-cuenta { margin-left: auto; color: var(--apagado); font-size: .8rem; }
+.pers-aviso { display: none; margin-top: .55rem; font-size: .84rem; }
+.pers-aviso.error { display: block; color: var(--error); }
+.pers-aviso.ok { display: block; color: var(--ok); }
+
+.pers-lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: .7rem;
+}
+.pers-tarjeta {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: .7rem .9rem;
+}
+.pers-tarjeta.inactivo { opacity: .55; }
+.pers-tarjeta.inactivo .pers-foto { filter: grayscale(1); }
+.pers-foto {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid var(--borde);
+  background: #0a0d12;
+  cursor: zoom-in;
+  transition: border-color .15s;
+}
+.pers-foto:hover { border-color: var(--acento); }
+.pers-datos { display: grid; gap: .15rem; min-width: 0; font-size: .86rem; }
+.pers-datos b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pers-datos .pers-rol { color: var(--apagado); font-size: .8rem; }
+.pers-datos small { color: var(--apagado); font-size: .72rem; }
+.pers-acciones { margin-left: auto; display: grid; gap: .3rem; flex-shrink: 0; }
+.pers-acciones .boton { padding: .18rem .6rem; font-size: .74rem; }
+.pers-acciones .boton.peligro:hover { border-color: var(--error); color: var(--error); }
+
+@media (max-width: 720px) {
+  .pers-form .pers-cuenta { margin-left: 0; width: 100%; }
+}
+
+/* ── Selector de periodo (HITO 4) ─────────────────────────────────────
+ * Gobierna TODAS las secciones. Va pegado bajo la cabecera porque es el
+ * contexto de todo lo que se lee debajo: sin verlo, cualquier cifra de la
+ * página es ambigua. */
+.periodo {
+  position: sticky;
+  top: 3.4rem;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .6rem;
+  margin: 0 0 1.2rem;
+  padding: .6rem .8rem;
+  background: color-mix(in srgb, var(--fondo) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio, 14px);
+}
+.periodo .chips { display: flex; gap: .3rem; }
+.periodo .chip {
+  padding: .3rem .7rem;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--apagado);
+  background: transparent;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.periodo .chip:hover { color: var(--texto); border-color: var(--acento); }
+.periodo .chip.activo {
+  color: #04212b;
+  background: var(--acento);
+  border-color: var(--acento);
+  font-weight: 600;
+}
+.periodo .campo {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .8rem;
+  color: var(--apagado);
+}
+.periodo input[type="date"],
+.periodo select {
+  font: inherit;
+  font-size: .82rem;
+  color: var(--texto);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: .25rem .45rem;
+}
+.periodo input[type="date"]:focus,
+.periodo select:focus { outline: none; border-color: var(--acento); }
+.periodo .cobertura { margin-left: auto; font-size: .78rem; color: var(--apagado); }
+.periodo .cobertura.ok { color: var(--apagado); }
+.periodo .cobertura.aviso { color: var(--naranja); }
+.periodo .cobertura.mal { color: #ff6b6b; }
+
+/* ── Variación contra el periodo anterior ─────────────────────────── */
+.kpi .delta { margin-top: .25rem; font-size: .72rem; color: var(--apagado); min-height: 1em; }
+.delta.sube { color: #3ddc84; }
+.delta.baja { color: #ff6b6b; }
+td .delta { font-size: .78rem; }
+
+/* ── Curva por hora ───────────────────────────────────────────────── */
+.curva {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 170px;
+  padding-top: .4rem;
+}
+.curva .hora {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: .25rem;
+  height: 100%;
+  min-width: 0;
+}
+.curva .barra-h {
+  width: 100%;
+  background: var(--acento);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+  transition: height .35s ease;
+}
+.curva .hora.punta .barra-h { background: var(--naranja); }
+.curva .hora .etq { font-size: .62rem; color: var(--apagado); }
+.curva .vacio { align-self: center; margin: auto; }
+.curva-nota { margin-top: .7rem; font-size: .82rem; color: var(--apagado); }
+.curva-nota b { color: var(--texto); }
+
+/* Perfil por pasillo: tabla chica dentro de su tarjeta. */
+#demo-pasillo table { font-size: .82rem; }
+#demo-pasillo small { color: var(--apagado); }

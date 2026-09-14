@@ -1,0 +1,79 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ===== Entornos virtuales =====
+venv/
+env/
+.env
+
+# ===== Modelos / pesos =====
+# Desde el 8-sep-2026 los de `models/` SI van por Git LFS (ver el
+# .gitattributes de la raiz): un clon en otra maquina tiene que traer con que
+# detectar. Las reglas por extension se conservan para que un peso suelto en
+# cualquier otra carpeta del servidor no se cuele por accidente.
+*.pt
+*.pth
+*.onnx
+*.engine
+*.bin
+!models/
+!models/**
+
+# ...pero NUNCA el enlace simbolico `models/models`, que apunta a
+# /home/gpu/Escritorio/ELDE/server/models — o sea, a su propia carpeta padre.
+# Es un bucle infinito (models/models/models/...) que atasca find, du, rsync,
+# el backup y el contexto de build de docker, y fuera de esa maquina apunta a
+# la nada. Ademas, en Windows core.symlinks=false lo materializa como un
+# fichero de texto de 39 bytes: commitearlo desde el portatil lo convertiria en
+# fichero regular y en Linux dejaria de ser un enlace sin que nadie lo note.
+#
+# La regla tiene que estar AQUI y no en el .gitignore de la raiz: el `!models/**`
+# de arriba des-ignora todo lo que cuelga de server/models, y el .gitignore de
+# una SUBCARPETA gana al de la raiz. Ponerla arriba no sirve de nada — se probo
+# el 9-sep-2026 y el enlace volvio a colarse en el siguiente `git add -A`.
+models/models
+
+# ===== Salidas de entrenamiento / inferencia =====
+runs/
+output/
+debugger/
+train/datasets/
+# `models/` SE VERSIONA desde el 8-sep-2026: los pesos viajan por Git LFS
+# (ver .gitattributes de la raiz) para que un clon en otra maquina traiga
+# con que detectar. Las corridas de entrenamiento siguen fuera por `runs/`.
+tmp_buffalo_l/
+tmp_mivolo_v2/
+
+# ===== VIGILANTE: la fuente si se versiona; el material pesado no =====
+vigilante_amazonas/pruebas/
+vigilante_amazonas/logs/
+vigilante_amazonas/snapshots/
+# La galeria son las FOTOS de las personas de interes que se enrolan desde el
+# panel (vigilante_amazonas/config.py: RUTA_GALERIA, creada en el arranque).
+# Es estado vivo del servidor —deploy/docker/estado_vivo.sh ya la preserva en
+# cada despliegue— pero NINGUNA regla la ignoraba: hoy no se nota porque las
+# carpetas estan vacias y git no ve carpetas vacias. En cuanto se enrola una
+# cara (probando en Windows, o en el propio servidor) sale como sin rastrear y
+# un `git add -A` la sube al repositorio y de ahi al resto de las maquinas.
+vigilante_amazonas/galeria/
+
+# ===== Logs y temporales =====
+*.log
+_servidor_log.txt
+_servidor_err.txt
+detection_log.txt
+multicam_test_output.txt
+multicam_grid_results.csv
+tmp/
+
+# ===== IDE / SO =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== Otros del proyecto =====
+Car Exit/

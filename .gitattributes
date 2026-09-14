@@ -1,0 +1,74 @@
+# ============================================================================
+# Pesos de los modelos por Git LFS (8-sep-2026)
+#
+# GitHub RECHAZA cualquier fichero de mas de 100 MB, y en `server/models` hay
+# siete por encima (el mayor, owlv2, 591 MB). Sin LFS el push falla entero, y
+# sin los pesos el servidor clonado arranca pero no detecta nada.
+#
+# Se declaran por EXTENSION y no por ruta para que un peso nuevo entre solo:
+# el fallo tipico es anadir un modelo, olvidar la regla y descubrirlo cuando
+# el push revienta a mitad de una subida de dos gigas.
+#
+# OJO con la cuota: LFS en repositorio privado trae 1 GB gratis de
+# almacenamiento y 1 GB/mes de trafico. Aqui van ~2 GB, asi que la
+# organizacion necesita un paquete de datos o el push se cortara al agotarla.
+# ============================================================================
+*.pth       filter=lfs diff=lfs merge=lfs -text
+*.pth.tar   filter=lfs diff=lfs merge=lfs -text
+*.pt        filter=lfs diff=lfs merge=lfs -text
+*.safetensors filter=lfs diff=lfs merge=lfs -text
+*.onnx      filter=lfs diff=lfs merge=lfs -text
+*.onnx.data filter=lfs diff=lfs merge=lfs -text
+*.caffemodel filter=lfs diff=lfs merge=lfs -text
+*.bin       filter=lfs diff=lfs merge=lfs -text
+*.tar       filter=lfs diff=lfs merge=lfs -text
+
+# ============================================================================
+# Finales de linea: LF para todo lo que Linux EJECUTA (9-sep-2026)
+#
+# El trabajo se hace en Windows 11 y el servidor es Ubuntu. Hasta hoy la unica
+# proteccion era `core.autocrlf=input` en la configuracion LOCAL de este clon,
+# que NO viaja: al clonar en otra maquina (o tras un formateo, que ya paso una
+# vez) vuelve el valor por defecto, un editor de Windows guarda un .sh con
+# CRLF, y en Ubuntu bash no tolera el CR: falla el shebang y cada linea con
+# `$'\r': command not found`. El actualizador del servidor ES uno de esos .sh,
+# asi que el fallo se lleva por delante el propio despliegue.
+#
+# `text eol=lf` normaliza a LF en el indice Y en el working tree, en cualquier
+# maquina y sin depender de la configuracion de nadie.
+# ============================================================================
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.json      text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.service   text eol=lf
+*.timer     text eol=lf
+*.conf      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+Dockerfile  text eol=lf
+.gitignore  text eol=lf
+.gitattributes text eol=lf
+
+# Lo que SOLO corre en Windows conserva CRLF: un .bat con LF puede fallar en
+# cmd.exe segun el interprete, y no lo lee ninguna maquina Linux.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Binarios: que git no los toque ni intente convertirlos jamas.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.db  binary

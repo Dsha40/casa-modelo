@@ -1,0 +1,49 @@
+{
+  "_README": [
+    "Prompts para el verificador VLM (Etapa 2) de Hummus.",
+    "",
+    "Cada entrada tiene:",
+    "  - 'prompt': el texto que recibe el modelo junto con el crop de la persona.",
+    "  - 'accept_words' (opcional): si la respuesta empieza con alguno de estos, se considera SI.",
+    "    Si se omite, se usan ['SI', 'SÍ', 'YES', 'Y '].",
+    "",
+    "Reglas para escribir buenos prompts SI/NO:",
+    "  1. Decile QUÉ tiene que detectar (escenario positivo, concreto).",
+    "  2. Decile qué NO cuenta (escenarios falsos positivos típicos).",
+    "  3. Pedile explícitamente la palabra exacta ('Responde SI o NO').",
+    "  4. Evitá ambigüedades como 'parece', 'tal vez'.",
+    "",
+    "Tras editar este archivo, reinicia el servidor (o desde Python:",
+    "vlm_verifier.get_verifier().reload_prompts()).",
+    "",
+    "8-sep-2026 — Prompts SUSTITUIDOS por los del repositorio HMA.",
+    "Los de aqui eran permisivos ('aunque NO se vea el objeto exacto',",
+    "'aunque la comida no se vea perfectamente nitida'), que para una etapa",
+    "de VERIFICACION se autoanula: confirma justo lo que deberia descartar.",
+    "Los nuevos enumeran las acciones que cuentan y, sobre todo, los falsos",
+    "positivos concretos (carteras, bolsos, mochilas, celulares, menus,",
+    "folletos, comida apoyada sin que nadie la toque).",
+    "",
+    "SIN VALIDAR contra un lote etiquetado: la Etapa 2 esta APAGADA por",
+    "defecto (Hummus.py, enable_vlm=False), asi que hoy no cambia nada en",
+    "produccion. Antes de encenderla, medir ambos juegos sobre los mismos",
+    "recortes y con el MISMO max_new_tokens que usa produccion (8): el",
+    "estudio de prompts genera con 80 y la comparacion enganaria."
+  ],
+  "TOMA_DE_ORDEN": {
+    "prompt": "Imagen de cámara de seguridad de un restaurante. Detecta el momento en que un cliente está realizando su pedido (toma de orden) o pagando en la zona de la caja registradora. Esto se evidencia por cualquiera de las siguientes acciones:\n1. El cliente interactúa verbalmente con la cajera/empleada señalando o indicando su pedido, mientras el empleado atiende y opera la pantalla de la caja registradora.\n2. El cliente realiza el pago entregando dinero en efectivo, acercando su tarjeta/celular al terminal de pago (datáfono), o interactuando para pagar.\n3. El empleado entrega al cliente un ticket de papel, recibo o un localizador/buscapersonas (buzzer/beeper/marcador de comida).\n\nResponde SI únicamente si observas que el cliente está pidiendo su orden, pagando, o recibiendo su ticket/localizador en la caja registradora.\n\nResponde NO obligatoriamente si:\n- El cliente solo está leyendo el menú estático solo, sin que el cajero lo esté atendiendo ni haya interacción de pedido o pago.\n- El cliente está parado esperando de brazos cruzados o en su celular en la fila, sin realizar el pedido.\n- El cliente está agarrando o retirando una bandeja de comida (esto es entrega de plato, no toma de orden).\n- El empleado está a solas limpiando o esperando sin clientes.\n\nRespuesta de una sola palabra: SI o NO.",
+    "accept_words": [
+      "SI",
+      "SÍ",
+      "YES"
+    ]
+  },
+  "RETIRO_BANDEJA": {
+    "prompt": "Imagen de cámara de seguridad de la zona de entrega de un restaurante. Analiza si el cliente está retirando o sujetando su pedido de comida para consumir en el local o para llevar. Esto se evidencia por cualquiera de las siguientes acciones:\n1. El cliente sostiene, levanta o retira con sus manos una o más bandejas de comida (bandejas de servicio para consumir en el local, usualmente de color naranja o de tonos oscuros/negros).\n2. El cliente sostiene, levanta o retira con sus manos una o más bolsas de cartón (bolsas de papel marrón o Kraft tipo delivery/para llevar) o bolsas plásticas con pedidos para llevar.\n3. El cliente sostiene, levanta o retira con sus manos platos (platos planos, platos hondos, bowls, masas de pizza/tortillas de comida), vasos de bebidas o envases individuales con comida.\n\nResponde SI únicamente si ves al cliente interactuando directamente y agarrando/levantando/sosteniendo con sus manos estos objetos (bandejas de comida o bolsas de cartón/papel para llevar) para retirarlos y llevárselos.\n\nResponde NO obligatoriamente si:\n- El objeto que sostiene el cliente es un artículo personal como una cartera, bolso de mano, cartera colgada, mochila, morral, billetera o celular (es sumamente común que los clientes sostengan, lleven colgados o manipulen sus bolsos personales; esto NO es un pedido de comida, responde NO).\n- Los platos de comida, masas, tortillas, vasos, bandejas o bolsas están simplemente apoyados sobre el mostrador o la barra pero el cliente NO los está agarrando, tocando o levantando con sus manos (si están en el mostrador quietos y el cliente solo está parado enfrente o tiene las manos apoyadas en el mostrador sin sujetar la comida/plato, responde NO).\n- El objeto es un menú, carta, folleto, díptico, papel informativo o letrero en el mostrador (es sumamente común que los clientes los agarren, sostengan, examinen, lean o muevan; esto NO es una entrega de plato, responde NO).\n- El cliente solo está tocando, agarrando, leyendo o consultando un menú o folleto.\n- El cliente solo tiene las manos apoyadas en el mostrador sin sujetar nada.\n- El empleado está realizando tareas a solas (por ejemplo, limpiando el mostrador de entrega, acomodando objetos, o parado esperando sin interactuar con ningún cliente).\n\nRespuesta de una sola palabra: SI o NO.",
+    "accept_words": [
+      "SI",
+      "SÍ",
+      "YES"
+    ]
+  }
+}

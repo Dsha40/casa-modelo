@@ -1,0 +1,358 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  MODO PermanenciaArea — cronómetro de personas, en un ÁREA o en una PUERTA
+# ═══════════════════════════════════════════════════════════════════════
+#
+#  La zona vigilada es el **ROI que dibujes en el recuadro del cliente**. No
+#  hay que calibrar nada aparte: es el mismo polígono amarillo de siempre.
+#
+#  El ciclo es el mismo en los dos modos: entra -> foto y cronómetro en marcha
+#  -> sale -> foto y tiempo total. Las alertas salen por WhatsApp (si el
+#  cliente tiene el interruptor del pie activado) y por Jarvis (con el local
+#  de cada cámara). Ambas leen la misma cola: no hay que configurarlas aparte.
+#
+#  Si borras este archivo, el modo sigue funcionando con estos mismos valores.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+# ── QUÉ ESTÁS MIRANDO ──────────────────────────────────────────────────
+# area   : la persona se VE mientras dura la permanencia. El ROI es la zona.
+# puerta : la persona DESAPARECE al entrar (no se ve el interior). El ROI es
+#          el vano de la puerta, y el sentido del cruce se deduce de dónde
+#          nace y dónde muere el seguimiento.
+# cruce  : el ROI es un UMBRAL VISIBLE que la gente atraviesa sin
+#          desaparecer, y la FLECHA decide el sentido: a favor = «Persona
+#          entrando al área», en contra = «Persona saliendo del área». Cada
+#          paso avisa con hora y foto; si la salida se empareja con una
+#          entrada vista, la alerta lleva además el tiempo que estuvo dentro.
+#          SIN flecha dibujada este modo no emite nada (la dirección se mide,
+#          no se adivina).
+#
+# linea  : el umbral es una LÍNEA dibujada sobre el vano, y el sentido sale
+#          de QUÉ LADO a QUÉ LADO se pasó. Para el gran angular donde la
+#          trayectoria se curva y la proyección sobre la flecha confunde.
+#          El operador lo dibuja con «─ Línea» o con «⇅ Puerta»: los dos dan
+#          la misma geometría y los lee el mismo detector (ver el bloque
+#          `linea:` de abajo). SIN umbral dibujado no emite nada.
+#
+# ATAJO (8-ago-2026): no hace falta editar esto para usar `cruce`. Con el
+# modo `area` (el global de abajo), DIBUJAR LA FLECHA en el recuadro del
+# cliente activa la lectura cruce para esa cámara; borrarla vuelve al área
+# clásica. Lo mismo vale para el umbral, que activa la lectura `linea` y
+# GANA a la flecha si por descuido están dibujados los dos. Los modos
+# explícitos `puerta`, `cruce` y `linea` no se ven afectados.
+#
+# Esto es lo global; abajo, en `camaras:`, se cambia por cámara.
+modo: area
+
+
+# ── ALERTAS ────────────────────────────────────────────────────────────
+
+# Avisar en cuanto alguien entra.
+# Ponlo en false si la zona tiene mucho tránsito: una alerta por cada persona
+# que cruza satura el WhatsApp y se dejan de leer todas, incluidas las que
+# importan.
+alertar_entrada: true
+
+# Avisar cuando sale, con el tiempo total que estuvo dentro.
+alertar_salida: true
+
+# Aviso mientras la persona SIGUE dentro, al superar estos segundos.
+# 0 = desactivado.
+#   300  = 5 min   ·  600 = 10 min  ·  1800 = 30 min
+# Es el umbral que responde "¿lleva demasiado ahí?".
+umbral_permanencia_s: 300
+
+# Cada cuántos segundos repetir ese aviso si la persona no se va.
+# 0 = avisar una sola vez y callar.
+realertar_cada_s: 300
+
+# Estancias más cortas que esto NO generan alerta de salida.
+# Filtra a quien solo cruza: sin esto, cada persona que pasa de largo manda un
+# WhatsApp de "estuvo 2 segundos".
+min_estancia_para_avisar_s: 3
+
+# FILTRO DE ROCES (11-ago-2026, pedido para frenar falsos positivos): la
+# alerta de ENTRADA se retiene hasta que la persona lleve estos segundos
+# dentro. Quien roza el área, se asoma un paso o pasa por delante y se va
+# antes de confirmar (y antes de `min_estancia_para_avisar_s`) no genera
+# NI entrada NI salida — silencio total. El cronómetro no pierde nada: la
+# alerta confirmada sale con la hora REAL de entrada.
+#   Súbelo si siguen colándose roces; 0 = avisar al instante (clásico).
+confirmar_entrada_s: 5
+
+
+# ── FOTOS ──────────────────────────────────────────────────────────────
+
+# Adjuntar recorte de la persona en la alerta.
+# Ojo: el emisor de WhatsApp DESCARTA las alertas sin imagen, así que ponerlo
+# en false silencia WhatsApp por completo (Jarvis sí las recibiría).
+incluir_foto: true
+
+
+# ── ¿QUIÉN CUENTA? ─────────────────────────────────────────────────────
+#
+# Cronometrar a quien NO tiene el rostro confirmado por la galería facial.
+#
+# El pipeline del que hereda este modo exige identidad confirmada porque su
+# trabajo es contar VISITANTES ÚNICOS, y eso tiene que ser exacto. Cronometrar
+# una permanencia es otra pregunta: basta con saber que hay alguien ahí.
+#
+# Con `false`, en una cámara que no saca rostros —picada alta, contraluz,
+# gente de espaldas— la máquina de zonas se queda VACÍA y este modo no mide
+# nada, sin un solo error en el log. Pasó en producción el 6-ago-2026.
+#
+# EL PRECIO de `true`: a quien no se le ve la cara se le sigue por el track.
+# Si una oclusión lo parte en dos, la segunda mitad es una persona nueva para
+# el sistema: cuenta otra entrada y su cronómetro empieza de cero. Se mide
+# PRESENCIA con fiabilidad; el número de personas DISTINTAS, no.
+# Ponlo en `false` si lo que necesitas es un conteo de únicos exacto y la
+# cámara sí ve caras.
+contar_sin_rostro: true
+
+# Guardar además una copia en disco. El base64 de la alerta es efímero; esto
+# es el respaldo consultable después ("enséñame las entradas del martes").
+guardar_fotos: true
+
+# Relativa a server/ si no es absoluta. Dentro se crean subcarpetas por fecha
+# y por cámara, más `estancias/` con el libro de quién sigue dentro.
+carpeta_evidencia: output/permanencia
+
+# Días que se conservan las fotos. Las carpetas de fecha más viejas se borran
+# solas. Una cámara de puerta llena el disco en semanas sin esto.
+retencion_dias: 30
+
+# Tamaño y calidad del JPEG que viaja en la alerta. Subirlos engorda cada
+# mensaje del WebSocket; 420 px basta para reconocer a una persona en un móvil.
+foto_max_ancho: 420
+foto_calidad: 80
+
+# Alerta de salida con la foto de ENTRADA y la de SALIDA pegadas lado a lado.
+# Es la que responde de un vistazo "¿es la misma persona?".
+foto_comparativa: true
+
+# La ESCENA COMPLETA de la entrada apilada sobre la de la salida, con las
+# cintas «Inicio»/«Fin» en la esquina (formato pedido el 10-ago-2026). La
+# hora la enseña el reloj de la propia cámara en cada cuadro. Cuando se
+# puede componer, ESTA es la foto que viaja en la alerta de salida; los
+# recortes de persona quedan de respaldo en disco.
+foto_escena: true
+
+
+# ── RECONOCER A QUIEN SALE ─────────────────────────────────────────────
+#
+# Orden de intento: rostro (persistent_id de la galería facial) -> cuerpo
+# (embedding OSNet guardado al entrar) -> única estancia abierta. La alerta
+# dice siempre cuál se usó, en `identidad_por`.
+
+# Coseno mínimo entre el cuerpo de quien entró y el de quien sale.
+# ALTO a propósito: la ropa es menos discriminativa que la cara, y un falso
+# emparejamiento asigna el tiempo de una persona a otra.
+#   0.90 = muy estricto (se atribuyen menos salidas, ninguna mal)
+#   0.86 = equilibrio
+#   0.80 = permisivo (empieza a confundir ropa parecida)
+reid_cuerpo_umbral: 0.86
+
+# Si hay EXACTAMENTE una persona dentro, atribuirle la salida aunque el Re-ID
+# no la confirme. Con una sola estancia abierta no hay ambigüedad posible.
+atribuir_si_unica: true
+
+# Avisar también cuando una salida no se pudo emparejar con ninguna entrada.
+# La alerta lo dice y NO lleva tiempo de permanencia (no se inventa).
+# Ponlo en false si esa cámara genera mucho ruido de este tipo.
+alertar_no_atribuida: true
+
+
+# ── LIBRO DE ESTANCIAS ─────────────────────────────────────────────────
+
+# Guardar en disco quién sigue dentro. Sin esto, un reinicio del servidor a
+# media tarde "vaciaría" el almacén y las salidas quedarían sin pareja.
+persistir_estancias: true
+
+# Cota de seguridad, NO un tiempo máximo esperado. Quien pase de aquí sin que
+# se vea su salida se cierra como "sin salida registrada", diciéndolo, y su
+# duración se reporta como cota inferior.
+# Súbelo si la gente puede pasar dentro más de un día.
+estancia_ttl_horas: 24
+
+# Tope de personas simultáneas dentro que se recuerdan (cota de memoria).
+max_estancias_abiertas: 200
+
+
+# ── DETECCIÓN DEL CRUCE (solo `modo: puerta`) ──────────────────────────
+#
+# LA FLECHA. En el recuadro del cliente, con PermanenciaArea activo, el menú
+# de ROI ofrece «Flecha de dirección». Arrastra UNA flecha desde fuera hacia
+# dentro: la punta (verde) es la ENTRADA y la cola (roja) la SALIDA. No hay
+# que dibujar dos: una puerta tiene un umbral, y el sentido contrario es el
+# otro por definición.
+#
+# Con la flecha, la dirección deja de deducirse del ciclo de vida del track y
+# pasa a medirse: se proyecta el desplazamiento de la persona sobre el vector.
+# Sin ella el modo sigue funcionando con la heurística de siempre.
+puerta:
+  # Frames seguidos en el nuevo estado antes de dar un cruce por bueno.
+  # Súbelo si sobran cruces; bájalo si la gente cruza muy rápido.
+  frames_confirmacion: 3
+
+  # Cuánto tiene que avanzar la persona a lo largo de la flecha para creerse
+  # la dirección, medido en ALTURAS DE SU PROPIO CUERPO (no en píxeles: así
+  # el mismo ajuste vale en 720p y en 4K, de cerca y de lejos).
+  #   0.5 = medio cuerpo   ·   1.0 = un cuerpo entero (más estricto)
+  # Por debajo del umbral el cruce se considera ambiguo y NO se cuenta,
+  # salvo que esté encendido el árbitro de abajo.
+  desplazamiento_min_altura: 0.5
+
+  # Sin ver un track este tiempo, se da por muerto (entró o se marchó).
+  segundos_ausencia: 2.0
+
+  # Un track que reaparece después de esto cuenta como nuevo. Cubre la
+  # oclusión corta sin fabricar cruces.
+  reinicio_ausencia_s: 30.0
+
+  # Frames mínimos de vida antes de creerse nada de un track. Filtra los
+  # parpadeos del detector, que nacen y mueren en el mismo sitio.
+  frames_minimos: 4
+
+  # Exigir que a la persona se la haya visto FUERA del vano en algún momento.
+  # Es lo que distingue "entró" de "estaba parada en la puerta".
+  # PONLO EN false si se pierden entradas porque el ROI cubre casi todo el
+  # pasillo y nunca se ve a nadie fuera de él.
+  # Con la flecha dibujada esto importa mucho menos: la dirección la decide
+  # el desplazamiento, no el haber estado fuera del vano.
+  exigir_fuera_de_zona: true
+
+
+# ── PASO VISIBLE CON DIRECCIÓN (solo `modo: cruce`) ────────────────────
+#
+# La flecha es OBLIGATORIA aquí: es la que define qué sentido es «entrando».
+# Se dibuja igual que en puerta (menú de ROI → «Flecha de dirección», con
+# PermanenciaArea activo): la punta (verde) apunta HACIA ADENTRO del local.
+cruce:
+  # Cuánto tiene que avanzar la persona a lo largo de la flecha para creerse
+  # la dirección, en ALTURAS DE SU PROPIO CUERPO. 0.5 = medio cuerpo.
+  # Súbelo si una persona que merodea en el umbral genera avisos de más;
+  # bájalo si la gente cruza en diagonal y se pierden pasos.
+  desplazamiento_min_altura: 0.5
+
+  # Frames mínimos de vida antes de creerse nada de un track. Filtra los
+  # parpadeos del detector.
+  frames_minimos: 4
+
+  # La MISMA persona no repite el MISMO sentido antes de esto (segundos).
+  # Cubre el churn del tracker en el umbral sin ocultar un reingreso real.
+  no_reemitir_s: 10.0
+
+  # Un track que reaparece después de esto cuenta como paso nuevo.
+  reinicio_ausencia_s: 30.0
+
+
+# ── LÍNEA DE CRUCE (solo `modo: linea`) ────────────────────────────────
+#
+# Una LÍNEA dibujada sobre el umbral de la puerta; el sentido sale de QUÉ
+# LADO a QUÉ LADO se pasó (DENTRO queda a la derecha caminando de P1 a P2;
+# el cliente lo rotula, y el doble clic sobre la línea voltea los lados).
+# Para las cámaras gran angular donde la gente entra curvándose y la
+# proyección sobre la flecha confunde entradas con salidas (10-ago-2026,
+# puerta de Kitchen Productions).
+#
+# ATAJO: con el modo `area`, DIBUJAR LA LÍNEA en el recuadro del cliente
+# activa esta lectura para esa cámara; borrarla vuelve al área clásica. Si
+# están dibujadas la línea Y la flecha, gana la línea.
+# SIN línea dibujada este modo no emite nada.
+#
+# DOS UTENSILIOS, UNA SOLA LECTURA (7-sep-2026): el mismo umbral se dibuja
+# con «─ Línea» (rótulos DENTRO/FUERA) o con «⇅ Puerta» (flecha doble
+# ENTRADA/SALIDA atravesándolo). Producen la MISMA geometría y las lee ESTE
+# detector, así que **nada de lo de abajo cambia según cuál se use**: no hay
+# un bloque `puerta:` que buscar. Lo único que cambia es el rótulo que ve el
+# operador, y la alerta lo deja escrito en `umbral_dibujado_con`.
+# La puerta la ofrecen los CUATRO clientes; la línea y la flecha, solo
+# Detecciones IA.
+linea:
+  # Histéresis: distancia mínima a la línea para dar un lado por FIRME, en
+  # ALTURAS DE LA PROPIA PERSONA. El jitter del tracker sobre el umbral no
+  # fabrica cruces. Súbelo si ves cruces dobles de gente parada en la puerta.
+  margen_lado_altura: 0.15
+
+  # Propina en las puntas del segmento (fracción de su largo): cruzar justo
+  # al filo del marco también cuenta. Cruzar la prolongación de la línea,
+  # lejos de la puerta, NO cuenta.
+  extension_segmento: 0.15
+
+  # Frames mínimos de vida antes de creerse nada de un track.
+  frames_minimos: 4
+
+  # La MISMA persona no repite el MISMO sentido antes de esto (segundos).
+  no_reemitir_s: 10.0
+
+  # Un track que reaparece después de esto cuenta como paso nuevo.
+  reinicio_ausencia_s: 30.0
+
+  # Sin ver un track este tiempo se da por muerto (para el desempate).
+  segundos_ausencia: 2.0
+
+  # Desempates tipo `puerta`, para cuando el tracker pierde (o encuentra) a
+  # la persona JUSTO en el marco sin que llegue a afirmarse al otro lado:
+  #   muerte     : venía firme de un lado, SE ACERCÓ (la distancia final es
+  #                claramente menor que la del nacimiento: quien está parado
+  #                no cuenta) y murió a menos de `umbral_vano_altura`
+  #                alturas del segmento -> cruzó al otro lado.
+  #   nacimiento : nació sin lado firme y su trayecto hasta afirmarse CORTA
+  #                el segmento -> cruzó hacia ese lado (afirmarse del mismo
+  #                lado donde nació es jitter y no emite).
+  # Apaga el que dé falsos en una cámara concreta.
+  umbral_vano_altura: 0.5
+  desempate_muerte: true
+  desempate_nacimiento: true
+
+
+# ── ÁRBITRO DE LOS CRUCES QUE NO SE PUEDEN DECIDIR ─────────────────────
+#
+# NO decide la dirección: eso lo hace la flecha, y lo hace bien (una
+# proyección, reproducible y en nanosegundos). Lo que arbitra es el RESIDUO:
+# la persona que aparece y desaparece en el vano sin desplazarse lo bastante
+# como para que la proyección signifique algo.
+#
+# Corre FUERA del bucle de inferencia, en su propio hilo y con cola acotada:
+# el vídeo nunca lo espera, y lo que no cabe se descarta y se cuenta. El
+# veredicto llega segundos después y abre o cierra la estancia con la hora
+# ORIGINAL del cruce, no con la de la respuesta.
+#
+# APAGADO por defecto. Sin activarlo el modelo ni se carga: no ocupa VRAM.
+# Lo que resuelve sale marcado (`direccion_por: vlm`) para que nadie confunda
+# una opinión con una medida.
+arbitro_vlm: false
+
+# Consultas simultáneas en espera. Pequeño a propósito: si se acumulan, los
+# veredictos llegan tan tarde que ya no sirven, y es mejor descartarlos.
+arbitro_max_cola: 4
+
+
+# ── AJUSTES POR CÁMARA ─────────────────────────────────────────────────
+#
+# La clave es el NOMBRE de la cámara tal como lo manda el cliente (el mismo
+# que sale en las capturas y en el título del recuadro). Lo que no se diga
+# aquí se hereda de los valores de arriba.
+#
+# Ejemplo — una puerta de almacén donde la gente pasa horas dentro, y un área
+# de caja donde solo interesa quien se queda mucho rato:
+#
+# camaras:
+#   "Puerta Almacen":
+#     modo: puerta
+#     umbral_permanencia_s: 3600      # avisar si lleva 1 h dentro
+#     estancia_ttl_horas: 12
+#   "Caja 3":
+#     modo: area
+#     alertar_entrada: false          # solo interesan las estancias largas
+#     umbral_permanencia_s: 180
+#
+# Anti-falsos de la LÍNEA en una cámara concreta (quién pasa por delante
+# sin entrar de verdad). Las tres perillas, de más suave a más dura:
+#   "Pasillo Cooler":
+#     confirmar_entrada_s: 8          # exigir más permanencia para avisar
+#     linea:
+#       margen_lado_altura: 0.25      # pisar MÁS adentro para contar el lado
+#       desempate_muerte: false       # sin inferencias si el tracker pierde
+#       desempate_nacimiento: false   #   o encuentra gente junto al marco
+camaras: {}

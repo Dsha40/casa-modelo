@@ -1,0 +1,75 @@
+// Como resuelve los imports el EDITOR (Pylance/Pyright). No afecta a la
+// ejecucion: es solo para que VS Code deje de marcar en rojo imports que en
+// tiempo de ejecucion funcionan perfectamente.
+//
+// El problema: este es un monorepo sin un solo sys.path. `elde_core` vive en
+// packages/ y llega por el venv de cada cliente o por un sys.path.insert
+// (selector.py, linea 43). Y cada cliente tiene SUS propios paquetes de primer
+// nivel dentro de su src/: `gui`, `core`, `model`, `config`, `workers`,
+// `utils`. Pylance no ejecuta el codigo, asi que sin esto marca "Import could
+// not be resolved" en medio repositorio y da la impresion de que ese codigo no
+// hace nada.
+//
+// Los cuatro clientes declaran un `gui` (y un `core`, y un `model`...) DISTINTO
+// cada uno. Por eso no vale una lista global de extraPaths: haria que "ir a la
+// definicion" desde el cliente de tienda te llevara al codigo de perimetrales.
+// Un executionEnvironment por carpeta mantiene a cada cliente resolviendo lo
+// suyo.
+//
+// typeCheckingMode "off": este codigo nunca se escribio con anotaciones
+// completas. Activar la comprobacion de tipos ahora llenaria el editor de miles
+// de avisos que nadie va a atender y taparia los reales. Aqui solo se quiere
+// que los imports resuelvan.
+{
+  "typeCheckingMode": "off",
+  "extraPaths": ["packages/elde_core"],
+
+  "exclude": [
+    "**/venv",
+    "**/venv_*",
+    "**/__pycache__",
+    "**/node_modules",
+    "packaging/build",
+    "packaging/dist",
+    "packaging/venv_build",
+    "modelos NVIDIA",
+    "server/models",
+    "server/weights",
+    "server/runs"
+  ],
+
+  "executionEnvironments": [
+    {
+      "root": "clients/tienda",
+      "extraPaths": ["packages/elde_core", "clients/tienda/src"]
+    },
+    {
+      "root": "clients/detecciones",
+      "extraPaths": ["packages/elde_core", "clients/detecciones/src"]
+    },
+    {
+      "root": "clients/perimetrales",
+      "extraPaths": ["packages/elde_core", "clients/perimetrales/src"]
+    },
+    {
+      "root": "clients/amazonas",
+      "extraPaths": ["packages/elde_core", "clients/amazonas/src"]
+    },
+    {
+      "root": "server",
+      "extraPaths": ["packages/elde_core", "server"]
+    },
+    {
+      "root": "packages/elde_core",
+      "extraPaths": ["packages/elde_core"]
+    },
+    {
+      "root": "packaging",
+      "extraPaths": ["packages/elde_core", "packaging"]
+    },
+    {
+      "root": ".",
+      "extraPaths": ["packages/elde_core"]
+    }
+  ]
+}

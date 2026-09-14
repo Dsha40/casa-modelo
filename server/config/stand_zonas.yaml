@@ -1,0 +1,90 @@
+# RECALIBRADO el 7-ago-2026 (13:08) sobre el frame REAL del pipeline
+# (1280x800, win-iVMS-4200, canal "Camera 01"): stand de degustacion
+# FINCA DOS AGUAS, con la promotora detras del mostrador y el pasillo
+# ajedrezado a su derecha.
+#
+# OJO: la calibracion anterior (5-ago) era de OTRA ESCENA — la charcuteria
+# del canal "Camera 04" a 1600x860. El operador cambio la vista de
+# iVMS-4200 y todas las zonas quedaron cayendo sobre estanterias: por eso
+# TODOS los visitantes salian descartados 'nunca_en_zona'. Si se vuelve a
+# cambiar el canal o el layout de la ventana, HAY QUE RECALIBRAR (el frame
+# de referencia se obtiene en http://localhost:9000/api/stand/frame).
+#
+# Coordenadas NORMALIZADAS 0..1 sobre el frame COMPLETO que analiza el
+# pipeline, con el cromo de iVMS-4200 incluido (barra superior hasta
+# y~0.08, barra inferior desde y~0.95).
+#
+# Referencias de la escena:
+#   - mostrador "Finca Dos Aguas" abajo-izquierda; la promotora trabaja
+#     DETRAS (el mostrador le ocluye las piernas: el punto-pie de su caja
+#     cae en el borde superior del mostrador, ~y 0.61);
+#   - el piso ajedrezado del centro-derecha es el pasillo por el que
+#     circula la gente;
+#   - estanterias a ambos lados (no son piso: quedan fuera de las zonas).
+#
+# CLAVE: zona_paso y zona_stand son DISJUNTAS (stand llega a x=0.55, paso
+# empieza en x=0.56): si se solapan, todo el que pasa cuenta como detenido.
+#
+# LIMITE CONOCIDO: el ROI dibujado en el CLIENTE cubre solo el mostrador
+# (x hasta ~0.55). Si ese ROI esta ACTIVO, el pipeline descarta las
+# detecciones del pasillo y zona_paso queda ciega: hay que arrastrarlo
+# para cubrir tambien el pasillo, o desactivarlo con su boton.
+generado_por: "recalibrado sobre frame real via /api/stand/frame (7-ago-2026 13:08)"
+frame_calibracion:
+  ancho: 1280
+  alto: 800
+verificado_contra_video: false
+
+zonas:
+  # Pasillo ajedrezado: el carril de paso, desde el borde de la franja del
+  # mostrador hasta la estanteria derecha (quien se para a mirar esa
+  # estanteria tambien "paso"). Es el DENOMINADOR de "personas que
+  # pasaron": si se queda corto, la captacion sale INFLADA.
+  zona_paso:
+    - [0.560, 0.450]
+    - [0.860, 0.450]
+    - [0.860, 0.950]
+    - [0.560, 0.950]
+
+  # Area de influencia del stand: la FRANJA de piso pegada al frente del
+  # mostrador. En esta escena el pasillo pasa por delante del stand, asi
+  # que la franja es angosta a proposito: si se ensancha, todo el que
+  # circula cuenta como interesado.
+  zona_stand:
+    - [0.360, 0.520]
+    - [0.550, 0.520]
+    - [0.550, 0.950]
+    - [0.300, 0.950]
+
+  # Pegado al mostrador de las muestras, donde ocurre la interaccion
+  # promotora-cliente.
+  zona_atencion:
+    - [0.360, 0.550]
+    - [0.500, 0.550]
+    - [0.500, 0.930]
+    - [0.330, 0.930]
+
+  # Detras del mostrador: donde se para la promotora. Baja hasta 0.68
+  # porque el mostrador OCLUYE sus piernas y el punto-pie de su caja cae
+  # en el borde del mostrador (~0.61), no en el suelo real.
+  zona_personal:
+    - [0.160, 0.440]
+    - [0.400, 0.440]
+    - [0.400, 0.680]
+    - [0.160, 0.680]
+
+  # Cruza el pasillo a media profundidad, a la altura del stand. La gente
+  # entra por el fondo del corredor y camina hacia la camara (y crece).
+  linea_conteo:
+    - [0.560, 0.640]
+    - [0.860, 0.620]
+
+homografia:
+  activa: false
+  puntos_imagen: []
+  puntos_mundo_m: []
+  nota: >
+    Sin homografia. Los umbrales de distancia y velocidad usan los valores
+    en pixeles y dependen de la perspectiva. Esta camara tiene ademas
+    distorsion de ojo de pez marcada, asi que una homografia plana tendria
+    error alto en los bordes. Limitacion documentada.

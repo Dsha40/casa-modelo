@@ -1,0 +1,162 @@
+# ===================================================================
+#  .gitignore del monorepo ELDE
+#  Regla general: se versiona FUENTE y CONFIGURACION. Nunca pesos de
+#  modelos, entornos virtuales, salidas de ejecucion ni empaquetados:
+#  son regenerables y hunden el repositorio (solo "modelos NVIDIA"
+#  ocupa 50 GB).
+# ===================================================================
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ===== Entornos virtuales (cada proyecto tiene el suyo) =====
+venv/
+venv_sistemasite_old/
+venv_*/
+env/
+.venv/
+
+# ===== Estado VIVO del servidor: NUNCA al repositorio (9-sep-2026) =====
+# Estos ficheros los escribe el servidor en caliente. Mientras estuvieron
+# rastreados, el `git reset --hard` del actualizador los revertia en CADA
+# despliegue: la SQLite del vigilante (meses de alertas, personas de interes y
+# fotos de referencia) volvia a un sembrado de 40 KB, y el interruptor del VLM
+# que acababa de encender el operador se apagaba solo. Ademas la BD esta en
+# modo WAL y el contenedor la tiene abierta: restaurarle encima un -wal/-shm
+# ajenos es justo el escenario de corrupcion que restaurar_dentro.sh evita
+# parando el servicio.
+# El actualizador los preserva y los restaura alrededor del reset
+# (deploy/docker/actualizar_docker.sh), asi que sacarlos del indice no los
+# borra del servidor.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+server/vigilante_amazonas/vlm_activo.txt
+
+# EXCEPCION: Thumbs.db es la cache de miniaturas de Windows, ya ignorada mas
+# abajo por su propia regla; no tiene nada que ver con estas bases de datos.
+
+# ===== Secretos: NUNCA al repositorio =====
+.env
+*.key
+*.pem
+
+# H-13, CERRADO el 31-jul-2026: las claves de Hik-Connect se ROTARON. Los
+# archivos que se excluian por llevarlas en claro ya no las llevan (get_url.py
+# las lee del .env; los HIKCONNECT_INTEGRATION.md estan enmascarados) y
+# vuelven al repositorio, como este bloque prometia. La carpeta hik-connect/
+# (SDK + notas) la movio el usuario fuera del proyecto.
+# REGLA VIVA: ninguna credencial se escribe en un archivo versionable; la
+# sesion se introduce en el panel de Dispositivos del cliente.
+
+# ===== Modelos y pesos (50 GB; compartir por red o Git LFS) =====
+modelos NVIDIA/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.bin
+*.safetensors
+models/
+weights/
+tmp_buffalo_l/
+tmp_mivolo_v2/
+
+# EXCEPCION: `server/models` SI se versiona desde el 8-sep-2026 (Git LFS,
+# ver .gitattributes). Sin los pesos, un clon en otra maquina arranca y no
+# detecta nada. Las reglas por extension de arriba se conservan para que un
+# peso suelto en cualquier OTRO sitio siga sin colarse por accidente.
+#
+# Las dos lineas hacen falta y en este orden: git no puede des-ignorar un
+# fichero si su DIRECTORIO esta ignorado, asi que primero se reabre la
+# carpeta y despues su contenido.
+!server/models/
+!server/models/**
+# ...pero NO un enlace simbolico dentro de esa carpeta. El 9-sep-2026 se colo
+# `server/models/models` -> /home/gpu/Escritorio/ELDE/server/models: un enlace
+# ABSOLUTO a su propio padre, o sea un bucle infinito (models/models/models...)
+# que atasca find, du, rsync, el backup y el contexto de build de docker, y que
+# en cualquier maquina que no sea esa apunta a la nada. Ademas, en Windows
+# core.symlinks=false lo materializa como un fichero de texto de 39 bytes, asi
+# que un commit desde el portatil lo convertiria en fichero regular.
+server/models/models
+
+# ===== SDK de terceros (Hikvision) =====
+# ~200 MB de .exe/.dll/.pdb/.pdf y demos en C#/C++: son 3954 de los 4054
+# archivos del arbol y NO son fuente de este proyecto. Se distribuyen
+# aparte, igual que ya se hace con perimetrales-view/src/sdk/.
+#
+# OJO: aqui habia un `!hik-connect/api hik.txt` para conservar la nota propia
+# de la API. Esa negacion iba DESPUES de la regla de secretos, asi que ganaba
+# y dejaba el archivo sin ignorar — y ese archivo lleva el App Key en claro
+# (H-13). Con el repositorio en publico eso era una fuga a un `git add -A` de
+# distancia. Se elimina la excepcion: la carpeta entera queda fuera.
+hik-connect/
+
+# ===== Empaquetados y distribucion =====
+*.zip
+dist/
+build/
+
+# ===== Salidas de ejecucion (se regeneran solas) =====
+output/
+runs/
+screenshots/
+capture/
+# ...pero `elde_core/capture/` NO es una salida: es el CODIGO que captura las
+# ventanas y alimenta a los cuatro clientes. La regla de arriba se lo estaba
+# tragando entero, asi que nunca llego a versionarse (descubierto el
+# 8-ago-2026 al corregir H-38). Sin esto, un clon del repositorio se queda sin
+# el worker de captura y ningun cliente funciona.
+!packages/elde_core/elde_core/capture/
+snapshots/
+_servidor_log.txt
+_servidor_err.txt
+_tienda_log.txt
+_amazonas_log.txt
+*.log
+
+# ===== Material de pruebas pesado =====
+vigilante_amazonas/pruebas/
+vigilante_amazonas/logs/
+
+# ===== IDE / SO =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== Salidas de ejecucion (7-ago-2026): logs rotados (.log.1 escapaba
+# de *.log) y capturas de los clientes =====
+server/logs/
+clients/*/logs/
+clients/*/capturas/
+
+# ===== Empaquetado (12-ago-2026) =====
+# Todo lo que sale de packaging\CONSTRUIR.bat: ~1,5 GB de carpetas portables y
+# ~880 MB de instaladores, mas un venv de construccion de varios GB. Se
+# regenera con un comando; en el repositorio no pinta nada.
+packaging/venv_build/
+packaging/build/
+packaging/dist/
+packaging/instaladores_generados/
+
+# ===== Despliegue automatico en los servidores Ubuntu (17-ago-2026) =====
+# Marcas de runtime del actualizador: el commit desplegado con exito y el
+# candado anti-solape. Viven en el clone de CADA servidor, no en el repo.
+.desplegado
+.actualizador.lock
+
+# ===== Docker (21-ago-2026): wheels locales para construir la imagen sin red =====
+deploy/docker/wheelhouse/*
+!deploy/docker/wheelhouse/.gitkeep
+# ===== Docker por vertical (Fase 4/5): estado propio de cada contenedor =====
+server/output_*/
+server/logs_*/
+.desplegado_docker

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stand de degustación · Dashboards ELDE</title>
+<link rel="stylesheet" href="/dashboards/shared/estilo.css">
+<link rel="stylesheet" href="/dashboards/shared/moderno.css">
+<style>
+  :root { --acento: #00d4aa; }
+
+  /* ── Embudo ── */
+  .embudo { display: flex; flex-direction: column; gap: 6px; }
+  .escalon { display: grid; grid-template-columns: 190px 1fr 120px;
+             align-items: center; gap: 10px; }
+  .escalon .pista { background: rgba(255,255,255,.05); border-radius: 4px;
+                    height: 30px; overflow: hidden; }
+  .escalon .relleno { height: 100%; background: var(--acento);
+                      display: flex; align-items: center; padding-left: 8px;
+                      font-weight: 600; color: #06121a; }
+  .escalon.peor .relleno { background: #ff5c5c; color: #fff; }
+  .escalon .caida { font-size: .82rem; color: var(--apagado);
+                    text-align: right; }
+  .escalon.peor .caida { color: #ff5c5c; font-weight: 600; }
+  .aviso-perdida { margin-top: 10px; padding: 8px 10px; border-radius: 6px;
+                   background: rgba(255,92,92,.12);
+                   border-left: 3px solid #ff5c5c; font-size: .9rem; }
+
+  /* ── Cruce demográfico ── */
+  .cruce td.celda { text-align: center; }
+  .cruce .tasa { font-weight: 700; }
+  .cruce .n { color: var(--apagado); font-size: .78rem; }
+
+  /* ── Temporal ── */
+  .serie { display: flex; align-items: flex-end; gap: 3px; height: 150px;
+           padding-top: 10px; overflow-x: auto; }
+  .serie .col { display: flex; flex-direction: column-reverse;
+                min-width: 26px; flex: 1; gap: 1px; }
+  .serie .seg { border-radius: 2px 2px 0 0; }
+  .leyenda { display: flex; gap: 14px; font-size: .8rem; margin-top: 8px;
+             color: var(--apagado); }
+  .leyenda i { display: inline-block; width: 10px; height: 10px;
+               border-radius: 2px; margin-right: 4px; }
+
+  /* ── Mapa de calor propio (matriz de /api/stand, no /api/v1/heatmaps) ── */
+  .mapa-caja { display: flex; gap: 14px; flex-wrap: wrap;
+               align-items: flex-start; }
+  .mapa-caja canvas { border-radius: 6px; background: #06121a;
+                      max-width: 100%; cursor: zoom-in; }
+
+  /* ── Calidad del dato ── */
+  #calidad { border-left: 3px solid #ffb340; }
+  .nota-calidad { font-size: .85rem; color: var(--apagado);
+                  margin-bottom: 10px; }
+  .comparativa { font-size: .75rem; margin-top: 2px; }
+  .comparativa.sube { color: #00d4aa; }
+  .comparativa.baja { color: #ff5c5c; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧀 Stand de degustación
+    <small><a href="/dashboards/" style="color:var(--apagado)">← todos los dashboards</a></small>
+  </h1>
+  <nav class="secciones">
+    <a href="#jornada">Jornada</a>
+    <a href="#embudo-sec">Embudo</a>
+    <a href="#demografia-sec">Demografía</a>
+    <a href="#temporal-sec">Horas</a>
+    <a href="#mapa-sec">Mapa de calor</a>
+    <a href="#chef-sec">Chef</a>
+    <a href="#visitantes-sec">Visitantes</a>
+    <a href="#calidad-sec">Calidad del dato</a>
+  </nav>
+  <span class="refresco"></span>
+</header>
+
+<main>
+<nav class="paneles">
+  <label style="display:flex;align-items:center;gap:8px">
+    Sesión:
+    <select id="selector-sesion"></select>
+  </label>
+</nav>
+
+<section id="jornada">
+  <h2>📊 La sesión en cifras</h2>
+  <p class="porque">El resultado de la jornada de un vistazo: cuánta gente pasó, cuánta se detuvo,
+    cuánta fue atendida y cuánta terminó probando — comparado con la media de las sesiones anteriores.</p>
+  <div class="kpis">
+    <div class="kpi"><div class="valor" data-kpi="pasaron">—</div><div class="nombre">pasaron</div><div class="comparativa" data-cmp="pasaron"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="se_detuvieron">—</div><div class="nombre">se detuvieron</div><div class="comparativa" data-cmp="se_detuvieron"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="atendidos">—</div><div class="nombre">atendidos</div><div class="comparativa" data-cmp="atendidos"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="degustaron">—</div><div class="nombre">degustaron</div><div class="comparativa" data-cmp="degustaron"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="tasa_captacion">—</div><div class="nombre">captación</div><div class="comparativa" data-cmp="tasa_captacion"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="tasa_atencion">—</div><div class="nombre">atención</div><div class="comparativa" data-cmp="tasa_atencion"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="tasa_degustacion">—</div><div class="nombre">degustación</div><div class="comparativa" data-cmp="tasa_degustacion"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="tasa_global">—</div><div class="nombre">conversión global</div><div class="comparativa" data-cmp="tasa_global"></div></div>
+  </div>
+</section>
+
+<section id="embudo-sec">
+  <h2>🔻 Embudo de conversión</h2>
+  <p class="porque">¿En qué paso se escapa la gente? Del que pasa por delante al que degusta:
+    el escalón en rojo es donde más personas se pierden y donde hay que actuar.</p>
+  <div class="tarjeta"><div class="embudo" id="embudo"></div><div id="aviso-perdida"></div></div>
+</section>
+
+<section id="demografia-sec">
+  <h2>👥 Demografía</h2>
+  <p class="porque">¿A quién le conecta el producto? Quiénes pasan por el stand y qué segmento
+    (género × edad) degusta más cuando se le atiende.</p>
+  <div class="rejilla2">
+    <div class="tarjeta"><h2>Distribución por género</h2><div class="barras" id="dist-genero"></div></div>
+    <div class="tarjeta"><h2>Distribución por rango etario</h2><div class="barras" id="dist-edad"></div></div>
+  </div>
+  <div class="tarjeta" style="margin-top:.9rem">
+    <h2>Tasa de degustación · género × edad</h2>
+    <p class="nota-calidad">A qué segmento le está conectando el producto. Entre paréntesis, degustaron/atendidos.</p>
+    <div id="cruce"></div>
+  </div>
+</section>
+
+<section id="temporal-sec">
+  <h2>🕐 Temporalidad</h2>
+  <p class="porque">¿A qué horas conviene reforzar el stand? Tráfico, atenciones y degustaciones
+    a lo largo de la jornada, en bloques de 15 minutos.</p>
+  <div class="tarjeta">
+    <div class="serie" id="serie"></div>
+    <div class="leyenda">
+      <span><i style="background:#3d9dff"></i>pasaron</span>
+      <span><i style="background:#ffb340"></i>atendidos</span>
+      <span><i style="background:#00d4aa"></i>degustaron</span>
+    </div>
+  </div>
+</section>
+
+<section id="mapa-sec">
+  <h2>🔥 Mapa de calor</h2>
+  <p class="porque">¿Dónde se planta la gente alrededor del stand? Elige la capa
+    (permanencia, tráfico o detenciones) y haz clic en el mapa para ampliarlo con cifras.</p>
+  <div class="tarjeta">
+    <div class="filtros">
+      <select id="f-mapa-tipo">
+        <option value="permanencia">permanencia (dónde se quedan)</option>
+        <option value="trafico">tráfico (por dónde pasan)</option>
+        <option value="detenciones">detenciones (dónde se anclan)</option>
+      </select>
+    </div>
+    <div class="mapa-caja" id="mapa-cont"></div>
+    <p class="nota-calidad" id="mapa-nota"></p>
+  </div>
+</section>
+
+<section id="chef-sec">
+  <h2>👨‍🍳 Rendimiento del chef</h2>
+  <p class="porque">¿Da abasto quien atiende? Cuántas atenciones hace, cuánto duran
+    y cuánta gente que se detuvo se marchó sin ser atendida.</p>
+  <div class="tarjeta">
+    <div class="kpis" style="margin:0">
+      <div class="kpi"><div class="valor" data-chef="atenciones">—</div><div class="nombre">atenciones</div></div>
+      <div class="kpi"><div class="valor" data-chef="por_hora">—</div><div class="nombre">atenciones / hora</div></div>
+      <div class="kpi"><div class="valor" data-chef="media">—</div><div class="nombre">duración media</div></div>
+      <div class="kpi"><div class="valor" data-chef="cierre">—</div><div class="nombre">tasa de cierre</div></div>
+      <div class="kpi"><div class="valor" data-chef="perdidos">—</div><div class="nombre">tráfico perdido</div></div>
+      <div class="kpi"><div class="valor" data-chef="perdidos_tasa">—</div><div class="nombre">% de detenidos sin atender</div></div>
+    </div>
+    <p class="nota-calidad" id="chef-nota"></p>
+  </div>
+</section>
+
+<section id="visitantes-sec">
+  <h2>🚶 Visitantes</h2>
+  <p class="porque">El detalle persona a persona detrás de las cifras: qué hizo cada visitante,
+    con filtros y exportación a CSV.</p>
+  <div class="tarjeta">
+    <div class="filtros">
+      <select id="f-clasificacion">
+        <option value="">todas las clasificaciones</option>
+        <option value="paso_de_largo">pasó de largo</option>
+        <option value="se_detuvo_sin_atencion">se detuvo sin atención</option>
+        <option value="atendido_sin_degustar">atendido sin degustar</option>
+        <option value="degusto">degustó</option>
+      </select>
+      <select id="f-genero">
+        <option value="">todos los géneros</option>
+        <option value="hombre">hombre</option>
+        <option value="mujer">mujer</option>
+      </select>
+      <a class="boton" id="btn-csv" href="#" download>⬇ exportar CSV</a>
+    </div>
+    <div id="tabla-visitantes"></div>
+  </div>
+</section>
+
+<section id="calidad-sec">
+  <h2>⚠️ Calidad del dato</h2>
+  <p class="porque">Cuánto hay que fiarse de todo lo de arriba: ninguna cifra es definitiva
+    sin leer esto — un null honesto vale más que un número bonito.</p>
+  <div class="tarjeta" id="calidad">
+    <div id="calidad-cuerpo"></div>
+  </div>
+</section>
+</main>
+
+<!-- El lightbox lo inyecta shared/util.js (montarLightbox) -->
+<script src="/dashboards/shared/api.js"></script>
+<script src="/dashboards/shared/util.js"></script>
+<script src="/dashboards/shared/ilustraciones.js"></script>
+<script src="/dashboards/stand/app.js"></script>
+</body>
+</html>

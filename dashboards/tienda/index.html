@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tienda · Dashboards ELDE</title>
+<link rel="stylesheet" href="/dashboards/shared/estilo.css">
+<link rel="stylesheet" href="/dashboards/shared/moderno.css">
+<link rel="stylesheet" href="/dashboards/tienda/estilo.css">
+</head>
+<body>
+<header>
+  <h1>🛒 Tienda — marketing y consumo
+    <small><a href="/dashboards/" style="color:var(--apagado)">← todos los dashboards</a></small>
+  </h1>
+  <nav class="secciones">
+    <a href="#hoy">Resumen</a>
+    <a href="#curva-sec">Curva</a>
+    <a href="#anaqueles-sec">Anaqueles</a>
+    <a href="#personal-sec">Personal</a>
+    <a href="#quien">Quién visita</a>
+    <a href="#mapas">Mapas de calor</a>
+    <a href="#pasillos-sec">Pasillos</a>
+    <a href="#capturas-sec">Capturas</a>
+    <a href="#camaras-sec">Cámaras</a>
+  </nav>
+  <button class="boton" id="btn-csv" title="Descarga en CSV lo que estás viendo: KPIs, curva por hora, pasillos y demografía del periodo elegido.">⬇ CSV</button>
+  <a class="boton" id="btn-pdf" href="/api/informes/tienda.pdf" target="_blank" rel="noopener"
+     title="Genera un PDF del día elegido: resumen comparado con el día anterior, anaqueles (visitas/agarres con el calor sobre la foto real), demografía por pasillo, mapas de calor, cada persona detectada, el personal y la explicación de cada término.">📄 Exportar PDF</a>
+  <span class="refresco"></span>
+</header>
+
+<main>
+<nav class="paneles" id="paneles"></nav>
+
+<!-- Selector de periodo: gobierna TODAS las secciones de abajo -->
+<div class="periodo" id="periodo">
+  <div class="chips">
+    <button class="chip activo" data-periodo="hoy">Hoy</button>
+    <button class="chip" data-periodo="ayer">Ayer</button>
+    <button class="chip" data-periodo="7d">7 días</button>
+    <button class="chip" data-periodo="30d">30 días</button>
+  </div>
+  <label class="campo">del <input type="date" id="f-desde"></label>
+  <label class="campo">al <input type="date" id="f-hasta"></label>
+  <label class="campo">cámara
+    <select id="f-camara"><option value="">todas</option></select>
+  </label>
+  <span class="cobertura" id="cobertura"></span>
+</div>
+
+<section id="hoy">
+  <h2>Resumen del periodo</h2>
+  <p class="porque">La foto del periodo elegido, comparada con el periodo anterior de la misma duración:
+    cuánta gente, cuánto se queda y qué gana.</p>
+  <div class="kpis">
+    <div class="kpi"><div class="valor" data-kpi="visitantes">—</div><div class="nombre">visitantes únicos</div><div class="delta" data-delta="visitantes_unicos"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="entradas">—</div><div class="nombre">entradas totales</div><div class="delta" data-delta="entradas"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="aforo">—</div><div class="nombre">personas ahora</div><div class="delta"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="permanencia">—</div><div class="nombre">permanencia media</div><div class="delta" data-delta="permanencia_media_s"></div></div>
+    <div class="kpi"><div class="valor" data-kpi="masConcurrido">—</div><div class="nombre">pasillo más concurrido</div><div class="delta"></div></div>
+    <div class="kpi naranja"><div class="valor" data-kpi="anaquelEstrella">—</div><div class="nombre">anaquel más agarrado</div><div class="delta"></div></div>
+  </div>
+</section>
+
+<section id="curva-sec">
+  <h2>📈 Curva — a qué hora entra la gente</h2>
+  <p class="porque">Entradas REALES al área de conteo por hora del día (antes esto era un conteo de fotos, que es otra cosa).
+    Sirve para decidir turnos, degustaciones y reposición.</p>
+  <div class="tarjeta">
+    <div class="curva" id="curva"></div>
+    <div class="curva-nota" id="curva-nota"></div>
+  </div>
+</section>
+
+<section id="anaqueles-sec">
+  <h2>🗄️ Anaqueles — preferencia por nivel del estante</h2>
+  <p class="porque">Qué nivel se <b style="color:var(--naranja)">agarra</b> (metieron la mano: la señal fuerte de preferencia)
+    y cuál solo se <b style="color:var(--acento)">visita</b> (se acercaron sin tocar). La conversión es agarres÷visitas:
+    un nivel muy visitado con poca conversión llama la atención pero no vende. Clic en un mapa de calor para ampliarlo.</p>
+  <div class="anq-camaras" id="anaqueles"><div class="vacio">sin datos de anaqueles — se llenan cuando una cámara transmite en modo Anaqueles con las áreas dibujadas</div></div>
+</section>
+
+<section id="personal-sec">
+  <h2>🪪 Personal de la tienda</h2>
+  <p class="porque">El personal enrolado no cuenta en el marketing (ni visitas, ni agarres, ni mapas de calor):
+    las cifras quedan solo de clientes. Además avisa cuando seguridad está en el pasillo o un pasillero surte un anaquel.
+    Las fichas de 👕 uniforme identifican la vestimenta (bordado y colores) también de espaldas: conviene subir frente y espalda con «+ foto».</p>
+  <div id="personal"><div class="vacio">cargando personal…</div></div>
+</section>
+
+<section id="quien">
+  <h2>👥 Quién visita</h2>
+  <p class="porque">Perfil demográfico de las personas que entraron en el periodo elegido, y cómo cambia de un pasillo a otro.</p>
+  <div class="rejilla2">
+    <div class="tarjeta"><h2>Género</h2><div class="barras" id="genero"></div></div>
+    <div class="tarjeta"><h2>Edad</h2><div class="barras" id="edad"></div></div>
+    <div class="tarjeta"><h2>Perfil por pasillo</h2><div id="demo-pasillo"></div></div>
+  </div>
+</section>
+
+<section id="mapas">
+  <h2>🔥 Mapas de calor — por dónde se mueve la gente</h2>
+  <p class="porque">Se muestran <b>todas</b> las cámaras con mapa, también las que aún no están registradas como de tienda
+    (marcadas «sin registrar»). Clic en cualquier mapa para ampliarlo; «histórico» abre el mapa de cada hora cerrada.
+    Ojo: el mapa es <b>acumulado</b>, no respeta el periodo de arriba; para comparar horas usa su histórico.</p>
+  <div class="filtros-mapas" id="filtros-mapas"></div>
+  <div class="heatmaps" id="heatmaps"></div>
+</section>
+
+<section id="pasillos-sec">
+  <h2>🚶 Pasillos por concurrencia</h2>
+  <p class="porque">Ranking del periodo, con quién sube y quién baja respecto al periodo anterior:
+    dónde conviene poner lo que se quiere vender.</p>
+  <div class="tarjeta" id="pasillos"></div>
+</section>
+
+<section id="capturas-sec">
+  <h2>📸 Capturas de personas</h2>
+  <p class="porque">Las fotos que alimentan la demografía, del periodo elegido. Clic para ampliar. Abajo, la búsqueda con IA sobre las capturas.</p>
+  <div class="galeria" id="capturas"></div>
+  <div class="paginacion">
+    <button id="mas" class="boton">Cargar más</button>
+    <span class="vacio" id="mas-nota"></span>
+  </div>
+  <div id="vlm" style="margin-top:1rem"></div>
+</section>
+
+<section id="camaras-sec">
+  <h2>🎥 Cámaras de tienda</h2>
+  <p class="porque">Qué dispositivos han transmitido, con qué modo y cuándo por última vez.</p>
+  <div class="tarjeta" id="dispositivos"></div>
+</section>
+</main>
+
+<!-- El lightbox lo inyecta shared/util.js (montarLightbox) -->
+<script src="/dashboards/shared/api.js"></script>
+<script src="/dashboards/shared/util.js"></script>
+<script src="/dashboards/shared/ilustraciones.js"></script>
+<script src="/dashboards/shared/vlm.js"></script>
+<script src="/dashboards/tienda/app.js"></script>
+<script>montarBuscadorVLM('vlm', 'capturas', 'p. ej. ¿alguien lleva mochila?');</script>
+</body>
+</html>

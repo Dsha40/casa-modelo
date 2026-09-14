@@ -1,0 +1,39 @@
+/* Barra de título — misma paleta que global.qss (1-ago-2026). */
+
+#title_bar {
+    background-color: #161b22;
+    border-bottom: 1px solid #2d333c;
+}
+
+QLabel#title_label {
+    color: #e6edf3;
+    font-weight: bold;
+    font-size: 12px;
+    padding-left: 12px;
+    background: transparent;
+}
+
+QPushButton#MinimizeButton,
+QPushButton#MaximizeButton,
+QPushButton#CloseButton {
+    border: none;
+    border-radius: 0;
+    background-color: transparent;
+    color: #8b949e;
+    font-weight: bold;
+    font-size: 14px;
+    padding: 0 8px;
+    width: 35px;
+    height: 35px;
+}
+
+QPushButton#MinimizeButton:hover,
+QPushButton#MaximizeButton:hover {
+    background-color: #1c222b;
+    color: #e6edf3;
+}
+
+QPushButton#CloseButton:hover {
+    background-color: #f85149;
+    color: #ffffff;
+}

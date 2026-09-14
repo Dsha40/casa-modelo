@@ -1,0 +1,296 @@
+/* dashboards/shared/moderno.css — capa de rediseño común (13-ago-2026).
+ *
+ * Se carga DESPUÉS de estilo.css en cada dashboard. estilo.css sigue siendo
+ * la base (variables, componentes); esta capa moderniza: cabecera pegajosa
+ * con navegación por secciones, subtítulos que explican qué responde cada
+ * bloque, tarjetas con sombra, cifras tabulares, chips de filtro, galerías
+ * ampliables y el lightbox. Cada página conserva su --acento de dominio.
+ */
+
+:root {
+  --radio: 14px;
+  --sombra: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .25);
+}
+
+body {
+  padding: 0 0 4rem;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+/* ── Cabecera pegajosa con navegación por secciones ─────────────────── */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--fondo) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--borde);
+  padding: .8rem 1.5rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+header h1 { font-size: 1.15rem; letter-spacing: -.01em; }
+header h1 small {
+  display: block;
+  font-size: .72rem;
+  font-weight: 400;
+  color: var(--apagado);
+  letter-spacing: 0;
+}
+header .refresco { font-size: .75rem; }
+
+nav.secciones {
+  display: flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+nav.secciones a {
+  color: var(--apagado);
+  text-decoration: none;
+  font-size: .78rem;
+  padding: .3rem .7rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+nav.secciones a:hover {
+  color: var(--texto);
+  border-color: var(--borde);
+  background: var(--panel);
+}
+
+main { padding: 1.4rem 1.5rem 0; max-width: 1500px; margin: 0 auto; }
+
+nav.paneles { margin: 0 0 1.2rem; }
+
+/* ── Secciones con título + subtítulo que explica la pregunta ───────── */
+section { margin-bottom: 2.2rem; scroll-margin-top: 4.5rem; }
+section > h2 {
+  font-size: 1.05rem;
+  color: var(--texto);
+  text-transform: none;
+  letter-spacing: -.01em;
+  font-weight: 700;
+  margin-bottom: .15rem;
+}
+section > .porque {
+  color: var(--apagado);
+  font-size: .84rem;
+  margin-bottom: .9rem;
+  max-width: 70ch;
+}
+
+/* ── KPIs ───────────────────────────────────────────────────────────── */
+.kpis {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: .7rem;
+}
+.kpi {
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: .9rem 1.05rem;
+  position: relative;
+  overflow: hidden;
+}
+.kpi::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--acento);
+  opacity: .8;
+}
+.kpi .valor {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.kpi .nombre { font-size: .78rem; }
+
+/* ── Tarjetas y tablas ──────────────────────────────────────────────── */
+.tarjeta {
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: 1rem 1.2rem;
+}
+.tarjeta > h2 {
+  font-size: .92rem;
+  margin-bottom: .7rem;
+  color: var(--texto);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.rejilla2 { gap: .9rem; }
+table { font-size: .84rem; }
+th { font-size: .76rem; text-transform: uppercase; letter-spacing: .04em; }
+td { font-variant-numeric: tabular-nums; }
+
+/* ── Barras (restyle del componente compartido) ─────────────────────── */
+.barra { grid-template-columns: 8.5rem 1fr 3.2rem; font-size: .84rem; }
+.barra .pista { height: 10px; border-radius: 5px; background: rgba(255,255,255,.05); }
+.barra .relleno { border-radius: 5px 4px 4px 5px; }
+.barra .cifra { font-variant-numeric: tabular-nums; }
+
+/* ── Chips de filtro ────────────────────────────────────────────────── */
+.filtros-mapas { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .9rem; align-items: center; }
+.chip {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  color: var(--apagado);
+  border-radius: 999px;
+  padding: .3rem .85rem;
+  font-size: .8rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.chip:hover { color: var(--texto); border-color: var(--acento); }
+.chip.activo { color: var(--acento); border-color: var(--acento); font-weight: 600;
+  background: color-mix(in srgb, var(--acento) 10%, var(--panel)); }
+.filtros-mapas .cuenta { margin-left: auto; color: var(--apagado); font-size: .8rem; }
+
+/* ── Galería de mapas de calor (todos, ampliables) ──────────────────── */
+.heatmaps { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: .9rem; }
+.heatmaps figure {
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  position: relative;
+}
+.heatmaps figure .zona-img {
+  cursor: zoom-in;
+  display: block;
+  aspect-ratio: 16 / 9;
+  background: #0a0d12;
+  overflow: hidden;
+}
+.heatmaps figure .zona-img img { width: 100%; height: 100%; object-fit: contain; }
+.heatmaps figure .zona-img:hover img { opacity: .85; }
+.heatmaps figure .etiquetas { position: absolute; top: .5rem; left: .5rem; display: flex; gap: .3rem; }
+.heatmaps figcaption {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  padding: .55rem .7rem;
+}
+.heatmaps figcaption b { color: var(--texto); font-size: .82rem; font-weight: 600; }
+.heatmaps figcaption .btn-historial { margin-left: auto; }
+.img-rota {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--apagado);
+  font-size: .78rem;
+  text-align: center;
+  padding: .8rem;
+}
+
+/* ── Galerías de fotos ──────────────────────────────────────────────── */
+.galeria { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.galeria a.item { border-radius: var(--radio); box-shadow: var(--sombra); cursor: zoom-in; }
+.galeria img { height: 170px; }
+
+/* ── Lightbox (ampliar cualquier imagen / mapa / rejilla) ───────────── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none;
+  background: rgba(4, 6, 10, .88);
+  backdrop-filter: blur(4px);
+  padding: 3.2rem 1.2rem 1.2rem;
+  overflow: auto;
+}
+.lightbox.abierto { display: block; }
+.lightbox .lb-caja {
+  max-width: min(1200px, 96vw);
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  overflow: hidden;
+}
+.lightbox .lb-cab {
+  display: flex;
+  align-items: baseline;
+  gap: .8rem;
+  padding: .8rem 1.1rem;
+  border-bottom: 1px solid var(--borde);
+}
+.lightbox .lb-cab h3 { font-size: .95rem; }
+.lightbox .lb-cab .lb-sub { color: var(--apagado); font-size: .8rem; }
+.lightbox .lb-cerrar {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--borde);
+  color: var(--texto);
+  border-radius: 8px;
+  padding: .25rem .7rem;
+  cursor: pointer;
+  font-size: .85rem;
+}
+.lightbox .lb-cerrar:hover { border-color: var(--acento); color: var(--acento); }
+.lightbox .lb-cuerpo { padding: 1rem; display: grid; place-items: center; }
+.lightbox .lb-cuerpo img, .lightbox .lb-cuerpo canvas {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+.lightbox .lb-pie { padding: 0 1.1rem .9rem; color: var(--apagado); font-size: .8rem; }
+.lightbox .lb-pie a { color: var(--acento); }
+
+/* ── Guías «¿Cómo leer esta sección?» (con pictograma) ──────────────── */
+.guia {
+  margin: 0 0 1rem;
+  border: 1px dashed var(--borde);
+  border-radius: var(--radio);
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+}
+.guia > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: .5rem .9rem;
+  font-size: .8rem;
+  color: var(--acento);
+  font-weight: 600;
+  user-select: none;
+}
+.guia > summary::-webkit-details-marker { display: none; }
+.guia > summary:hover { text-decoration: underline; }
+.guia[open] { border-style: solid; }
+.guia[open] > summary { border-bottom: 1px solid var(--borde); }
+.guia-cuerpo {
+  display: flex;
+  gap: 1.1rem;
+  align-items: flex-start;
+  padding: .9rem 1rem;
+}
+.guia-ilu { flex: 0 0 150px; color: var(--apagado); }
+.guia-ilu .ilu { width: 150px; height: auto; display: block; }
+.ilu .acc { stroke: var(--acento); }
+.ilu .warm { stroke: #ffa028; }
+.ilu .ok { stroke: var(--ok); }
+.ilu text { fill: var(--texto); }
+ul.guia-texto {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: .45rem;
+  font-size: .84rem;
+  color: var(--texto);
+  max-width: 75ch;
+}
+.guia-texto li::marker { color: var(--acento); }
+.guia-texto b { color: var(--acento); }
+.guia-texto .naranja, .guia-texto b.warm { color: #ffa028; }
+
+@media (max-width: 720px) {
+  header { position: static; }
+  .guia-cuerpo { flex-direction: column; }
+  .guia-ilu, .guia-ilu .ilu { width: 120px; flex-basis: auto; }
+}

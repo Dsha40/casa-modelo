@@ -1,0 +1,184 @@
+# Configuración del modo Comedor (fila, retiro, compra, Re-ID y grupos).
+#
+# SOLO se leen las claves pre-declaradas en hummus_config.py:_DEFECTOS (mismo
+# patrón que permanencia_config.yaml y anaqueles_config.yaml): una clave que
+# el código no declara se avisa en el log y se descarta. El merge es POR
+# BLOQUE: pisar una clave no borra el resto de su bloque.
+#
+# Este archivo DOCUMENTA los valores por defecto del código: tal cual está,
+# no cambia nada. Nace de ESPECIFICACION.md del pipeline-comedor (25-ago-2026).
+
+# ── Interruptor y cámara principal ──────────────────────────────────────
+comedor:
+  # Interruptor general del modo comedor.
+  activo: true
+  # Etiqueta del local en la bitácora. La cámara concreta la identifica su
+  # camera_id; esto solo nombra las filas del almacén.
+  camara: caja
+
+# ── Zonas ───────────────────────────────────────────────────────────────
+# NO hay archivo de zonas. Las dibuja el operador en el recuadro del cliente
+# y llegan POR FRAME, en píxeles del frame enviado — el mismo patrón que
+# PermanenciaArea y Anaqueles, y la razón de que no haya que escalar nada.
+#
+#   zona azul  «Toma de orden»    ->  caja       (ancla de la COMPRA)
+#   zona roja  «Entrega de plato» ->  recepcion  (ancla del RETIRO)
+#   zona gris  «Personal»         ->  personal   (excluye del conteo)
+#
+# Una cámara sin zonas dibujadas se sigue trackeando, pero no genera eventos
+# de zona: mejor no medir que medir mal.
+
+# ── Clases del modelo fino ──────────────────────────────────────────────
+# El motor razona sobre DOS conceptos —bandeja (la comida) y factura (la prueba
+# de pago)— y el modelo no los llama así. `1080.pt` (Roboflow
+# tickets-restaurants-beq0t v2, 150 épocas a 1280 px) trae cinco clases:
+#
+#   ticket-solo · indicador-solo · indicador-con-ticket   ->  factura
+#   bandeja-de-comida · bolsa-de-comida-para-llevar       ->  bandeja
+#
+# La coincidencia era EXACTA y el normalizador no tocaba los guiones, así que
+# «bandeja-de-comida» no igualaba a «bandeja»: las listas de ids salían vacías
+# y el comedor no veía nada, sin un solo error en el log. Ahora los alias van
+# primero y, si ninguno casa, se resuelve por subcadena (hummus_clases.py).
+clases_modelo:
+  # Alias aceptados para la clase bandeja (según cómo se entrenó el modelo).
+  bandeja: [bandeja, tray, bandeja-de-comida, bolsa-de-comida-para-llevar]
+  # Alias aceptados para la clase factura.
+  factura: [factura, receipt, recibo, ticket, ticket-solo, indicador-solo,
+            indicador-con-ticket]
+  # Red de seguridad para un modelo reentrenado con otra nomenclatura.
+  coincidencia_por_subcadena: true
+  # Confianza mínima POR TIPO DE OBJETO. Valores medidos por el equipo de HMA
+  # sobre 60 capturas reales de este mismo mostrador: bandeja y bolsa son
+  # grandes y estables; el ticket es papel pequeño y medio tapado por la mano
+  # del cajero (mediana 0.28, percentil 10 en 0.03).
+  conf_bandeja: 0.45
+  conf_bolsa: 0.40
+  conf_ticket: 0.20
+  conf_indicador: 0.20
+  # Para una clase que se llame literalmente «factura» o «recibo».
+  conf_factura: 0.30
+  # Dos cajas del MISMO concepto solapadas por encima de esto son el mismo
+  # objeto físico (el NMS de YOLO es por clase y deja pasar «ticket-solo» e
+  # «indicador-con-ticket» sobre el mismo papel).
+  nms_iou: 0.45
+
+# ── Clasificación de empleados (zona personal ∪ uniforme naranja) ───────
+empleados:
+  # Fracción del tiempo con el centroide en `personal` para marcar empleado.
+  frac_personal: 0.5
+  # Ratio mínimo de píxeles naranja en el tercio superior del crop.
+  umbral_naranja: 0.25
+  # Segundos mínimos observados antes de decidir si alguien es empleado.
+  ventana_min_s: 10.0
+  # Crops de calidad que forman la mediana del ratio naranja.
+  max_muestras_naranja: 10
+  # Límite HSV inferior del naranja del uniforme [H, S, V].
+  hsv_bajo: [5, 100, 100]
+  # Límite HSV superior del naranja del uniforme [H, S, V].
+  hsv_alto: [25, 255, 255]
+
+# ── Motor de eventos (EN_FILA / COMPRA / RETIRO) ────────────────────────
+eventos:
+  # Segundos sostenidos en `caja` para confirmar una COMPRA.
+  dwell_compra_seg: 8.0
+  # Segundos sostenidos en `fila` para confirmar EN_FILA.
+  # OJO: hoy EN_FILA no puede dispararse — exige la zona `fila` y el recuadro
+  # no tiene con qué dibujarla (solo azul=caja, roja=recepción, gris=personal).
+  # Queda cableado para cuando exista esa zona.
+  dwell_fila_seg: 5.0
+  # Posesión de bandeja: M frames con solape de los últimos N.
+  frames_posesion_m: 8
+  # El N de la ventana anterior (tolera huecos de detección).
+  frames_posesion_n: 12
+  # Distancia máxima (px) entre centroides para asociar factura→persona.
+  dist_factura_px: 120.0
+  # Frames sostenidos de esa asociación para darla por buena.
+  frames_asociacion: 5
+  # Dwell cumplido SIN factura → COMPRA_PROBABLE con confianza reducida.
+  permitir_compra_sin_factura: true
+  # Un mismo (tipo, persona) no se re-emite dentro de estos segundos.
+  refractario_seg: 20.0
+  # Segundos fuera de la fila para cerrar el estado EN_FILA.
+  salida_fila_seg: 3.0
+
+# ── Re-ID corporal (OSNet): identidad aunque salga y vuelva ─────────────
+reid:
+  # Interruptor del Re-ID corporal.
+  activo: true
+  # Similitud coseno mínima para re-asignar un global_id existente.
+  umbral: 0.65
+  # Embeddings máximos por identidad (reemplazo FIFO).
+  k_max: 10
+  # Separación mínima (s) entre muestras de la misma identidad.
+  min_sep_s: 1.0
+  # Crops de calidad acumulados antes de intentar el matching.
+  crops_para_matchear: 3
+  # Minutos sin verse para archivar la identidad (sale del matching).
+  ttl_min: 60.0
+  # Alto mínimo (px) del bbox para que el crop alimente la galería.
+  alto_min_px: 80
+  # Confianza mínima de la detección para que el crop cuente.
+  conf_min: 0.5
+
+# ── Grupos (acompañantes): co-entrada + proximidad sostenida ────────────
+grupos:
+  # Interruptor de la detección de acompañantes.
+  activo: true
+  # Diferencia máxima (s) entre primeras apariciones para co-entrada.
+  ventana_co_entrada_seg: 10.0
+  # Distancia máxima (px) entre centroides para contar proximidad.
+  dist_px: 150.0
+  # Fracción mínima del tiempo compartido en frame pasada en proximidad.
+  frac_proximidad: 0.4
+  # Segundos mínimos de coexistencia en frame para evaluar el par.
+  min_compartido_s: 15.0
+
+# ── Verificación retiro↔compra (transacciones) ──────────────────────────
+verificacion:
+  # Interruptor del emparejamiento retiro↔compra.
+  activa: true
+  # Minutos para expirar una pendiente (→ ALERTA_SIN_PAGO / COMPRA_SIN_RETIRO).
+  ventana_min: 30.0
+
+# ── Horario del local ───────────────────────────────────────────────────
+# Dentro de la pausa NO se ejecuta inferencia: el recuadro recibe el frame con
+# el cartel «IA EN PAUSA - LOCAL CERRADO» y la GPU queda libre. Con 16 recuadros
+# por conexión eso es toda la noche de GPU que hoy se gasta en un mostrador
+# vacío. Nace apagado para no cambiarle el comportamiento a nadie sin avisar.
+#
+# OJO: si lo enciendes, la hora de apertura (`fin_pausa`) debería coincidir con
+# ELDE_HUMMUS_CORTE_JORNADA_H del almacén, o el reporte contará un día y la
+# base guardará otro. El propio módulo avisa en el log si no coinciden.
+horario:
+  activo: false
+  inicio_pausa: "22:00"
+  fin_pausa: "10:00"
+
+# ── Reporte por WhatsApp ────────────────────────────────────────────────
+# APAGADO por defecto a propósito: manda mensajes a un grupo real. Los conteos
+# salen del almacén SQLite, no de la memoria, así que un procesador recién
+# nacido tras una reconexión informa igual del turno completo, y el libro de
+# jornada (output/reportes_hummus/jornada.json) garantiza UN solo envío por
+# turno aunque haya varias cámaras o el servidor se reinicie.
+reporte:
+  activo: false
+  # Grupo del bot (…@g.us). Vacío = el PDF solo se guarda en disco.
+  grupo_whatsapp: ""
+  # Turnos de los que se informa, al cerrar cada uno.
+  # Vacío = solo el reporte de cierre de jornada.
+  turnos: "12:00-14:00,15:00-17:00,17:00-21:00"
+  # Nombre del local en la portada del PDF.
+  local: ""
+
+# ── Rendimiento ─────────────────────────────────────────────────────────
+rendimiento:
+  # imgsz de la pasada de personas.
+  imgsz_personas: 640
+  # imgsz de la pasada de bandejas/facturas. 0 = heredar el del checkpoint.
+  # Ultralytics NO lo hereda solo: cae a 640, y el modelo del comedor se
+  # entrenó a 1280 justo porque el ticket es diminuto (~39 px, que a 640 se
+  # quedan en ~20). Poner un número aquí fuerza esa resolución.
+  imgsz_eventos: 0
+  # FP16: 'auto' = sí en CUDA, no en CPU. true/false para forzarlo.
+  half: auto
