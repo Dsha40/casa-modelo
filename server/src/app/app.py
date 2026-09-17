@@ -19,6 +19,7 @@ from starlette.websockets import WebSocketState
 
 from . import baliza_descubrimiento as _baliza
 from . import captura_contrato as _captura
+from . import fallo_imagen_IA_pipeline as _fallo
 from . import registro_dispositivos as _registro
 from . import validacion_contrato as _validacion
 from . import whatsapp_alertas as _whatsapp
@@ -1081,6 +1082,14 @@ def _full_frame_sync(
     # puede llevar cajas pintadas; en modo directo (el real hoy) va limpio.
     _heatmaps.acumular_desde_metadata(camera_id, camera_name, img, metadata)
     processing_time = round(time.time() - t0, 3)
+
+    # Un fallo ATRAPADO por el pipeline sale como `error`, no como un frame
+    # bueno sin detecciones: eso congelaba al cliente en silencio (17-sep-2026,
+    # ver fallo_imagen_IA_pipeline.py).
+    fallo = _fallo.respuesta_si_fallo(metadata, camera_id, processing_time)
+    if fallo is not None:
+        return fallo
+
 
     # MODO DIRECTO: no se codifica ni envia la imagen (el cliente la dibuja).
     if not draw_server:

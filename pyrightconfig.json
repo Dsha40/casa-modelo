@@ -52,10 +52,6 @@
       "extraPaths": ["packages/elde_core", "clients/perimetrales/src"]
     },
     {
-      "root": "clients/amazonas",
-      "extraPaths": ["packages/elde_core", "clients/amazonas/src"]
-    },
-    {
       "root": "server",
       "extraPaths": ["packages/elde_core", "server"]
     },

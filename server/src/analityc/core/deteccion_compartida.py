@@ -5,7 +5,7 @@ Hummus y Misters detectaban con YOLO — cada uno con su copia del modelo y
 varios con el tracker INTERNO de ultralytics (.track). Este módulo les da:
 
   - UN solo modelo RF-DETR-M por proceso (los mismos pesos/knobs del
-    vigilante: RFDETR_PESOS/RESOLUCION/DTYPE de vigilante_amazonas.config),
+    vigilante cuando está; sin él, valores propios — ver `ajustes_rfdetr`),
     con carga perezosa — un contenedor que no lo usa no paga nada.
   - `detectar_sv()`: sv.Detections listo para ByteTrack/PolygonZone, con
     class_id en el espacio ultralytics-80 que todo el código ya entiende.
@@ -21,7 +21,9 @@ porque estos pipelines también piden bicycle/dog (base_perimeter).
 from __future__ import annotations
 
 import logging
+import os
 import threading
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
@@ -42,25 +44,75 @@ _instancia: Optional["_DetectorCompartido"] = None
 #: pagaba import + intento de carga completos bajo el candado).
 _fallo_construccion: Optional[tuple] = None
 
+#: Carpeta de los pesos sin vigilante: la que documenta
+#: deploy/requirements_servidor_ubuntu.txt. MODELS_DIR la mueve igual que al
+#: resto de modelos base (ver analityc/config/config.py).
+_CARPETA_PESOS = Path(__file__).resolve().parents[3] / 'models' / 'base'
+_NOMBRE_PESOS = 'rf-detr-medium.pth'
+
+
+def ajustes_rfdetr() -> Dict[str, Any]:
+    """Pesos, resolución, dtype y dispositivo del RF-DETR compartido.
+
+    Con el vigilante a mano (monorepo) salen de `vigilante_amazonas.config`,
+    como siempre: los dos detectores del proceso van con los mismos knobs.
+
+    En el corte de TIENDAS ese paquete no viaja, y hasta el 16-sep-2026 este
+    import tumbaba el detector: `process_frame` fallaba en CADA frame con «No
+    module named 'vigilante_amazonas'», devolvia metadata sin `detections`,
+    app.py lo respondia como `success` y el cliente en modo directo no tenia
+    nada que repintar. Sin vigilante, resolución y dtype quedan en None = los
+    de la propia librería para esos pesos: los valores afinados viven en un
+    config que este repositorio no tiene, y aquí no se inventan.
+    """
+    try:
+        from vigilante_amazonas import config as cfg
+    except ModuleNotFoundError as exc:
+        # Solo la AUSENCIA del paquete activa los valores propios. Si el
+        # vigilante está pero le falta algo por dentro, el error debe verse.
+        if exc.name != 'vigilante_amazonas':
+            raise
+    else:
+        return {
+            'pesos': Path(cfg.RFDETR_PESOS),
+            'resolucion': cfg.RFDETR_RESOLUCION,
+            'dtype': cfg.RFDETR_DTYPE,
+            'dispositivo': cfg.resolver_dispositivo(cfg.DEVICE_DETECCION),
+        }
+    import torch
+    carpeta = (os.getenv('MODELS_DIR') or '').strip() or str(_CARPETA_PESOS)
+    return {
+        'pesos': Path(carpeta) / _NOMBRE_PESOS,
+        'resolucion': None,
+        'dtype': None,
+        'dispositivo': 'cuda' if torch.cuda.is_available() else 'cpu',
+    }
+
 
 class _DetectorCompartido:
-    """RF-DETR-M único del proceso; mismos knobs que el vigilante."""
+    """RF-DETR-M único del proceso; mismos knobs que el vigilante si está."""
 
     def __init__(self) -> None:
-        from vigilante_amazonas import config as cfg
+        ajustes = ajustes_rfdetr()
+        pesos: Path = ajustes['pesos']
+        if not pesos.exists():
+            raise RuntimeError(f"pesos RF-DETR ausentes: {pesos}")
+
         from rfdetr import RFDETRMedium
         from rfdetr.detr import COCO_CLASSES
 
-        if not cfg.RFDETR_PESOS.exists():
-            raise RuntimeError(f"pesos RF-DETR ausentes: {cfg.RFDETR_PESOS}")
-        self.dispositivo: str = cfg.resolver_dispositivo(cfg.DEVICE_DETECCION)
-        self._modelo = RFDETRMedium(
-            pretrain_weights=str(cfg.RFDETR_PESOS),
-            resolution=cfg.RFDETR_RESOLUCION,
-            device=self.dispositivo)
+        self.dispositivo: str = ajustes['dispositivo']
+        # None = no se pasa: que la librería use el suyo para estos pesos.
+        opciones: Dict[str, Any] = {'pretrain_weights': str(pesos),
+                                    'device': self.dispositivo}
+        if ajustes['resolucion'] is not None:
+            opciones['resolution'] = ajustes['resolucion']
+        self._modelo = RFDETRMedium(**opciones)
+        compilar: Dict[str, Any] = {'compile': True, 'batch_size': 1}
+        if ajustes['dtype'] is not None:
+            compilar['dtype'] = ajustes['dtype']
         try:
-            self._modelo.inference(compile=True, batch_size=1,
-                                   dtype=cfg.RFDETR_DTYPE)
+            self._modelo.inference(**compilar)
         except Exception as exc:                     # noqa: BLE001
             logger.warning("RF-DETR compartido sin compilar (eager): %s", exc)
         self._id91_a_pseudo: Dict[int, int] = {
@@ -72,9 +124,9 @@ class _DetectorCompartido:
         self._candado = threading.Lock()
         self.detectar(np.zeros((600, 960, 3), dtype=np.uint8))   # warmup
         logger.info(
-            "detector compartido cargado: %s (RF-DETR %dpx %s) en %s",
-            cfg.RFDETR_PESOS.name, cfg.RFDETR_RESOLUCION, cfg.RFDETR_DTYPE,
-            self.dispositivo)
+            "detector compartido cargado: %s (RF-DETR %s px, dtype %s) en %s",
+            pesos.name, ajustes['resolucion'] or 'por defecto',
+            ajustes['dtype'] or 'por defecto', self.dispositivo)
 
     def detectar(self, frame_bgr: np.ndarray, conf_min: float = 0.3,
                  clases: Optional[Sequence[int]] = None) -> sv.Detections:

@@ -229,13 +229,15 @@ def _build_config() -> Dict[str, Any]:
 def _pesos_vivos() -> List[Any]:
     """Los pesos que el servidor SI abre hoy: el detector RF-DETR.
 
-    Se lee de `vigilante_amazonas.config` de forma perezosa y tolerante: este
-    modulo es de configuracion y no puede tumbar el arranque porque otro
-    paquete no este a mano (los tests lo importan suelto).
+    La ruta la decide `deteccion_compartida.ajustes_rfdetr` (la del vigilante
+    si esta, la local si no). Antes se leia SOLO del vigilante y, en el corte
+    de tiendas, la validacion no comprobaba nada: el arranque no avisaba de
+    unos pesos ausentes. Perezoso y tolerante: este modulo es de
+    configuracion y no puede tumbar el arranque (los tests lo importan suelto).
     """
     try:
-        from vigilante_amazonas import config as _vig
-        return [getattr(_vig, 'RFDETR_PESOS', '')]
+        from ..core.deteccion_compartida import ajustes_rfdetr
+        return [ajustes_rfdetr()['pesos']]
     except Exception:                                   # noqa: BLE001
         return []
 

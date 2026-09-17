@@ -86,3 +86,72 @@ def test_rastreador_persistente_mantiene_ids(monkeypatch):
             ids.add(t['track_id'])
             assert set(t) == {'track_id', 'bbox', 'conf', 'cls_coco'}
     assert len(ids) == 1, ids
+
+
+# ── Ajustes del RF-DETR con y sin vigilante (16-sep-2026) ─────────────────
+# En el corte de tiendas `vigilante_amazonas` no existe, y leer sus knobs
+# tumbaba el detector: ningun frame de tiendas detectaba nada.
+
+def _sin_vigilante(monkeypatch):
+    # None en sys.modules hace que el import lance ModuleNotFoundError con
+    # name='vigilante_amazonas', igual que si el paquete no estuviera.
+    monkeypatch.setitem(sys.modules, 'vigilante_amazonas', None)
+
+
+def test_sin_vigilante_usa_pesos_locales_y_defaults_de_la_libreria(monkeypatch):
+    torch = pytest.importorskip('torch')
+    _sin_vigilante(monkeypatch)
+    monkeypatch.delenv('MODELS_DIR', raising=False)
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    a = dc.ajustes_rfdetr()
+    assert a['pesos'] == RAIZ / 'server' / 'models' / 'base' / 'rf-detr-medium.pth'
+    assert a['resolucion'] is None and a['dtype'] is None
+    assert a['dispositivo'] == 'cpu'
+
+
+def test_sin_vigilante_respeta_models_dir(monkeypatch, tmp_path):
+    pytest.importorskip('torch')
+    _sin_vigilante(monkeypatch)
+    monkeypatch.setenv('MODELS_DIR', str(tmp_path))
+    assert dc.ajustes_rfdetr()['pesos'] == tmp_path / 'rf-detr-medium.pth'
+
+
+def test_con_vigilante_usa_sus_knobs(monkeypatch):
+    import types
+    cfg = types.SimpleNamespace(
+        RFDETR_PESOS=Path('/pesos/vig.pth'), RFDETR_RESOLUCION=576,
+        RFDETR_DTYPE='float16', DEVICE_DETECCION='auto',
+        resolver_dispositivo=lambda d: 'cuda:0')
+    paquete = types.ModuleType('vigilante_amazonas')
+    paquete.config = cfg
+    monkeypatch.setitem(sys.modules, 'vigilante_amazonas', paquete)
+    assert dc.ajustes_rfdetr() == {
+        'pesos': Path('/pesos/vig.pth'), 'resolucion': 576,
+        'dtype': 'float16', 'dispositivo': 'cuda:0'}
+
+
+def test_vigilante_roto_por_dentro_no_se_disimula(monkeypatch, tmp_path):
+    """Solo la AUSENCIA del paquete activa los valores propios: un 
+    paquete.mkdir()
+    (paquete / '__init__.py').write_text('')vigilante
+    presente cuyo config no importa debe seguir fallando a la vista, no
+    arrancar en silencio con otros pesos."""
+    paquete = tmp_path / 'vigilante_amazonas'
+    (paquete / 'config.py').write_text('import dependencia_ausente_elde\n')
+
+    def _suyos():
+        return [k for k in sys.modules
+                if k == 'vigilante_amazonas'
+                or k.startswith('vigilante_amazonas.')]
+    # En el monorepo el vigilante REAL ya esta importado (conftest): se
+    # aparta y se devuelve, o las demas pruebas verian el paquete falso.
+    guardados = {k: sys.modules.pop(k) for k in _suyos()}
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        with pytest.raises(ModuleNotFoundError) as fallo:
+            dc.ajustes_rfdetr()
+        assert fallo.value.name == 'dependencia_ausente_elde'
+    finally:
+        for k in _suyos():
+            del sys.modules[k]
+        sys.modules.update(guardados)
