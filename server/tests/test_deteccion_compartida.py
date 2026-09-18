@@ -131,14 +131,14 @@ def test_con_vigilante_usa_sus_knobs(monkeypatch):
 
 
 def test_vigilante_roto_por_dentro_no_se_disimula(monkeypatch, tmp_path):
-    """Solo la AUSENCIA del paquete activa los valores propios: un 
-    paquete.mkdir()
-    (paquete / '__init__.py').write_text('')vigilante
+    """Solo la AUSENCIA del paquete activa los valores propios: un vigilante
     presente cuyo config no importa debe seguir fallando a la vista, no
     arrancar en silencio con otros pesos."""
     paquete = tmp_path / 'vigilante_amazonas'
+    paquete.mkdir()
+    (paquete / '__init__.py').write_text('')
     (paquete / 'config.py').write_text('import dependencia_ausente_elde\n')
-
+    
     def _suyos():
         return [k for k in sys.modules
                 if k == 'vigilante_amazonas'
