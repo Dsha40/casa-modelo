@@ -44,6 +44,7 @@ import json
 import numpy as np
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict, deque
 
@@ -82,27 +83,72 @@ class _CameraConfigView:
         return getattr(AnalyticsConfig, name)
 
 
+#: Sufijo de INSTALACION que `elde_core.ui.identidad_camara.device_id` pega al
+#: final del id de las camaras por ventana: '-i' + slug(instalacion, 12).
+_SUFIJO_INSTALACION = re.compile(r'-i[A-Za-z0-9_.-]{1,12}$')
+
+
+def _ruta_perfil(nombre: str) -> str:
+    """Ruta del perfil para un nombre de camara ya sanitizado."""
+    safe = "".join(c for c in str(nombre) if c.isalnum() or c in "_-")[:64]
+    if not safe:
+        return ''
+    return os.path.join(_PROJECT_ROOT, 'config', 'camera_profiles',
+                        f"{safe}.json")
+
+
+def _resolver_perfil(camera_id: Any) -> str:
+    """Ruta del perfil aplicable a esta camara, o '' si no hay ninguno.
+
+    Se prueban dos nombres, del MAS especifico al mas general:
+
+      1. `<camera_id>.json` tal cual.
+      2. `<camera_id sin el sufijo de instalacion>.json`.
+
+    El segundo existe por lo que paso el 9-sep-2026: `device_id()` estreno el
+    parametro `instalacion` para separar dos clientes que capturan ventanas
+    homonimas, y les pego un '-i<marca>' al final. Los perfiles calibrados el
+    7 y 8 de agosto (`win-iVMS-4200.json`, `win-iVMS-4200-c2.json`) quedaron
+    con el nombre de antes y dejaron de cargarse: se seguia arrancando con
+    `por_id={}` y la tarde de mediciones que hay dentro no la aplicaba nadie.
+
+    Un perfil describe la OPTICA y la ESCENA —ojo de pez, altura del montaje,
+    iluminacion de supermercado—, y eso no cambia segun que PC capture la
+    ventana; el sufijo separa CLIENTES, no camaras. Por eso el nombre base es
+    un defecto razonable. Quien necesite distinguirlos crea el fichero con el
+    id completo: el paso 1 gana siempre y el 2 ni se consulta.
+
+    NO se toca `device_id()`: heatmaps, capturas, `tienda_visitas` y el
+    registro de dispositivos siguen llaveados por el id completo, que es lo
+    que los mantiene separados entre clientes.
+    """
+    if camera_id is None:
+        return ''
+    crudo = str(camera_id)
+    for nombre in (crudo, _SUFIJO_INSTALACION.sub('', crudo)):
+        ruta = _ruta_perfil(nombre)
+        if ruta and os.path.exists(ruta):
+            return ruta
+    return ''
+
+
 def _load_camera_profile(camera_id: Any) -> _CameraConfigView:
     """Carga el perfil demografico de la camara si existe.
 
     Busca config/camera_profiles/<camera_id>.json (el <camera_id> se
-    sanitiza a [alnum_-], igual que los nombres de reporte). Las claves
-    del JSON son nombres de atributos de AnalyticsConfig (p.ej.
+    sanitiza a [alnum_-], igual que los nombres de reporte), y si no esta,
+    reintenta sin el sufijo de instalacion (ver `_resolver_perfil`). Las
+    claves del JSON son nombres de atributos de AnalyticsConfig (p.ej.
     "DEMO_MIN_CONTRAST": 12.0); las que empiezan con '_' se ignoran
     (sirven de comentario) y las desconocidas se avisan y descartan.
     Sin archivo -> vista sin overrides (config global intacta).
     """
     if camera_id is None:
         return _CameraConfigView()
-    safe = "".join(c for c in str(camera_id)
-                   if c.isalnum() or c in "_-")[:64]
-    if not safe:
-        return _CameraConfigView()
-    path = os.path.join(_PROJECT_ROOT, 'config', 'camera_profiles',
-                        f"{safe}.json")
-    if not os.path.exists(path):
-        logger.debug("Sin perfil demografico para camara %s (%s); "
-                     "uso config global", camera_id, path)
+    path = _resolver_perfil(camera_id)
+    if not path:
+        logger.debug("Sin perfil demografico para camara %s; "
+                     "uso config global", camera_id)
         return _CameraConfigView()
     try:
         with open(path, 'r', encoding='utf-8') as f:
