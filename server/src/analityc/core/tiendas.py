@@ -362,20 +362,38 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 logger.info("Re-identificador COMPARTIDO reusado (DB única "
                             "entre cámaras)")
             else:
+                # Politica "ttl": la galeria es memoria de trabajo (caduca por
+                # persona y no toca disco). Ver REID_RESET_POLICY en config.
+                _politica = AnalyticsConfig.REID_RESET_POLICY
+                _con_ttl = _politica == "ttl"
                 self._reidentifier = FaceReidentifier(
                     embedding_session=getattr(self, '_face_embedding_session',
                                               None),
                     db_path=AnalyticsConfig.REID_DB_PATH,
                     similarity_threshold=(
                         AnalyticsConfig.REID_SIMILARITY_THRESHOLD),
-                    reset_policy=AnalyticsConfig.REID_RESET_POLICY,
+                    reset_policy=_politica,
+                    ttl_seconds=(AnalyticsConfig.REID_TTL_S if _con_ttl
+                                 else 0.0),
+                    persistir=not _con_ttl,
                 )
-                # Guardar la DB al cerrar el proceso (Ctrl+C / shutdown)
-                try:
-                    import atexit
-                    atexit.register(self._reidentifier.force_save)
-                except Exception:
-                    pass
+                if _con_ttl:
+                    logger.info(
+                        "Re-identificador con TTL de %.0f min (galeria en RAM)",
+                        AnalyticsConfig.REID_TTL_S / 60.0)
+                else:
+                    # Guardar la DB al cerrar el proceso (Ctrl+C / shutdown).
+                    # Solo con galeria persistente: `atexit` guarda una
+                    # referencia FUERTE al metodo, asi que cada conexion
+                    # websocket dejaria vivo su FaceReidentifier —con su
+                    # galeria entera— hasta que muera el proceso, y al apagar
+                    # se ejecutarian todos en orden inverso, sobrescribiendo
+                    # el mismo fichero uno tras otro.
+                    try:
+                        import atexit
+                        atexit.register(self._reidentifier.force_save)
+                    except Exception:
+                        pass
 
             # Re-ID CORPORAL (OSNet) — 2a senal para espaldas. COMPARTIDO entre
             # camaras (galeria efimera unica). NUNCA se persiste (la ropa cambia).

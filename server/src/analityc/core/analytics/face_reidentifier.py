@@ -20,6 +20,15 @@ Modelo:
 
 Storage:
   output/person_db/persons.pkl con dict[uuid] -> dict de metadata.
+
+Retencion (21-sep-2026):
+  Con `reset_policy="ttl"` —el defecto— la galeria es MEMORIA DE TRABAJO y no
+  un archivo biometrico: cada persona caduca `REID_TTL_S` segundos despues de
+  su ultima aparicion (`_caducar_locked`) y nada se escribe a disco. Los datos
+  de negocio no viven aqui: `tienda_almacen.py` ya guarda una fila por
+  (jornada, camara, persona) en SQLite con permanencia y demografia, y los
+  informes salen de ahi. Esta galeria solo sirve para reconocer a quien vuelve
+  a cruzar el campo de vision dentro de la ventana.
 """
 
 import os
@@ -111,13 +120,21 @@ class FaceReidentifier:
                  embedding_session=None,
                  db_path: Optional[str] = None,
                  similarity_threshold: float = 0.50,
-                 reset_policy: str = "daily"):
+                 reset_policy: str = "daily",
+                 ttl_seconds: float = 0.0,
+                 persistir: bool = True):
         """
         Args:
             embedding_session: onnxruntime InferenceSession con w600k_r50.
             db_path: ruta del pickle. Default: output/person_db/persons.pkl
             similarity_threshold: cosine minimo para considerar misma persona.
-            reset_policy: "never", "daily", "weekly", "manual".
+            reset_policy: "ttl", "never", "daily", "weekly", "manual".
+            ttl_seconds: vida de una persona desde su `last_seen`. 0 = sin
+              caducidad (comportamiento historico). Ver `_caducar_locked`.
+            persistir: False deja la galeria SOLO en RAM (ni carga ni guarda
+              el pickle). Con TTL corto el disco no aporta —la ventana viva
+              es de minutos— y evita que dos conexiones websocket, cada una
+              con su propia galeria, se sobrescriban el mismo archivo.
         """
         self._session = embedding_session
         if self._session is not None:
@@ -147,7 +164,13 @@ class FaceReidentifier:
         # Config
         self._sim_threshold = float(similarity_threshold)
         self._reset_policy = reset_policy
+        self._ttl_s = max(0.0, float(ttl_seconds))
+        self._persistir = bool(persistir)
         self._lock = threading.RLock()
+        # Personas caducadas por TTL desde que arranco el proceso (telemetria
+        # del dashboard: con TTL el total de la galeria ya no es el acumulado
+        # historico, asi que sin este contador no se ve cuanta gente paso).
+        self._session_expired_count: int = 0
 
         # In-memory DB:
         # {
@@ -196,6 +219,7 @@ class FaceReidentifier:
     @property
     def total_unique_persons(self) -> int:
         with self._lock:
+            self._caducar_locked(time.time())
             return len(self._db)
 
     @property
@@ -206,10 +230,23 @@ class FaceReidentifier:
     def session_reidentified_count(self) -> int:
         return self._session_reidentified_count
 
+    @property
+    def session_expired_count(self) -> int:
+        return self._session_expired_count
+
     # ── Persistencia ─────────────────────────────────────────────
 
     def _load_db(self):
         """Carga la DB del disco aplicando reset_policy."""
+        if not self._persistir:
+            # Galeria en RAM: arrancar vacia es lo correcto. El pickle de una
+            # instalacion anterior solo traeria gente cuyo `last_seen` ya
+            # excede el TTL, asi que la primera busqueda la purgaria entera:
+            # leer sus embeddings (~10 KB por persona) para tirarlos es
+            # trabajo perdido.
+            self._last_save_date = datetime.date.today()
+            self._db_file_mtime = 0.0
+            return
         if not os.path.isfile(self._db_path):
             logger.info(f"FaceReidentifier: DB nueva ({self._db_path})")
             self._last_save_date = datetime.date.today()
@@ -257,6 +294,11 @@ class FaceReidentifier:
             return False
         if self._reset_policy == "manual":
             return False
+        if self._reset_policy == "ttl":
+            # La caducidad es POR PERSONA (`_caducar_locked`), no por fecha:
+            # vaciar entera la galeria a medianoche cortaria a quien esta en
+            # el pasillo en ese momento y lo volveria a contar.
+            return False
         if self._reset_policy == "daily":
             return saved_date != today
         if self._reset_policy == "weekly":
@@ -286,6 +328,12 @@ class FaceReidentifier:
         Esto resuelve la race condition entre el dashboard que borra
         personas y el proceso de analytics que tenia su propia copia.
         """
+        if not self._persistir:
+            # Sin persistencia, el pickle que hubiera en disco es de otra
+            # instalacion y no describe esta galeria. Dejarlo entrar entregaria
+            # el borrado de nuestra gente a un archivo con el que no tenemos
+            # nada que ver: `memory - disk` seria TODA la ventana viva.
+            return
         if not os.path.isfile(self._db_path):
             return
         try:
@@ -336,6 +384,8 @@ class FaceReidentifier:
         Antes de guardar, sincroniza con el disco para no sobrescribir
         cambios externos (ej. eliminaciones desde el dashboard webapp).
         """
+        if not self._persistir:
+            return
         with self._lock:
             try:
                 self._sync_external_deletions()
@@ -354,6 +404,51 @@ class FaceReidentifier:
                 self._db_file_mtime = os.path.getmtime(self._db_path)
             except Exception as e:
                 logger.error(f"FaceReidentifier: error guardando DB: {e}")
+
+    def _caducar_locked(self, ahora: float) -> int:
+        """Quita de la galeria a quien lleva mas de `ttl_s` sin ser visto.
+
+        El llamador debe tener el lock (misma convencion que
+        `_best_in_gallery` y `_sync_external_deletions`).
+
+        Se mide desde `last_seen`, NO desde `first_seen`: quien sigue en el
+        pasillo se refresca en cada re-identificacion y no caduca aunque lleve
+        una hora dentro. Es el mismo criterio que `GestorIdentidad._caducar`
+        (stand_identidad.py) y que `BodyReidentifier._prune_locked`, que ya
+        tratan sus galerias como memoria de trabajo y no como archivo.
+
+        Tambien borra el jpg del rostro: si caducara el registro pero no la
+        imagen, `output/person_db/faces/` seguiria creciendo sin limite y
+        habriamos cambiado un problema por otro.
+
+        Returns:
+            cuantas personas se quitaron (0 si el TTL esta desactivado).
+        """
+        if self._ttl_s <= 0:
+            return 0
+        corte = ahora - self._ttl_s
+        vencidas = [uid for uid, rec in self._db.items()
+                    if float(rec.get('last_seen', 0.0)) < corte]
+        for uid in vencidas:
+            del self._db[uid]
+            face_path = os.path.join(self._faces_dir, f"{uid}.jpg")
+            if os.path.isfile(face_path):
+                try:
+                    os.remove(face_path)
+                except OSError as e:
+                    logger.debug("No se pudo borrar %s: %s", face_path, e)
+        if vencidas:
+            # El mapeo track->persona es lo que hace que un track ya visto no
+            # recalcule su embedding. Si apunta a alguien que acaba de caducar,
+            # la siguiente llamada devolveria un uuid que ya no existe.
+            muertos = set(vencidas)
+            for tid in [t for t, p in self._track_to_person.items()
+                        if p in muertos]:
+                del self._track_to_person[tid]
+            self._session_expired_count += len(vencidas)
+            logger.debug("REID TTL: caducaron %d personas (ttl=%.0fs)",
+                         len(vencidas), self._ttl_s)
+        return len(vencidas)
 
     def _save_throttled(self):
         """Guarda al disco si paso el intervalo de throttle."""
@@ -422,6 +517,7 @@ class FaceReidentifier:
         serializar (sin embedding raw, sin sets).
         """
         with self._lock:
+            self._caducar_locked(time.time())
             out = []
             for uid, rec in self._db.items():
                 out.append({
@@ -524,6 +620,7 @@ class FaceReidentifier:
             return None
         thr = self._sim_threshold if threshold is None else float(threshold)
         with self._lock:
+            self._caducar_locked(time.time())
             best_uid, best_sim = self._best_in_gallery(embedding)
         if best_uid is not None and best_sim >= thr:
             return best_uid, float(best_sim)
@@ -582,6 +679,10 @@ class FaceReidentifier:
             # y evita re-identificar a una persona que el usuario quiso
             # eliminar.
             self._sync_external_deletions()
+            # Y sacar a los caducados ANTES de buscar: si no, una persona a la
+            # que el TTL ya dio por ida seguiria capturando el match y su
+            # visita no empezaria de cero.
+            self._caducar_locked(time.time())
 
             # Buscar mejor match: para cada persona, la maxima similitud
             # entre el query y CUALQUIERA de sus embeddings (multi-embedding).
@@ -856,9 +957,14 @@ class FaceReidentifier:
 
     def stats(self) -> Dict[str, int]:
         with self._lock:
+            self._caducar_locked(time.time())
             return {
                 'total_persons': len(self._db),
                 'session_new': self._session_new_count,
+                # Con TTL, `total_persons` es la ventana viva y no el acumulado
+                # del dia: `session_expired` es lo que falta para reconstruir
+                # cuanta gente paso (nuevos = vivos + caducados).
+                'session_expired': self._session_expired_count,
                 'session_reidentified': self._session_reidentified_count,
                 'active_tracks': len(self._track_to_person),
                 'persons_with_demographics': sum(

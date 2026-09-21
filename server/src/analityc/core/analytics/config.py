@@ -297,11 +297,36 @@ class AnalyticsConfig:
     REID_MAX_YAW_FOR_REGISTRATION: float = 20.0
     # Pitch maximo para registrar (mas estricto que el de clasificacion)
     REID_MAX_PITCH_FOR_REGISTRATION: float = 35.0
-    # Politica de reset: "never", "daily", "weekly", "manual"
+    # Politica de reset: "ttl", "never", "daily", "weekly", "manual"
+    # "ttl": cada persona caduca REID_TTL_S segundos despues de la ULTIMA vez
+    # que se la vio, y la galeria NO se persiste (vive en RAM, como la del
+    # Re-ID corporal y la del stand). Es el defecto desde el 21-sep-2026.
     # "never": la DB de personas NUNCA se borra automaticamente. Solo se
     # vacia si el usuario la borra manualmente (dashboard webapp, o
     # eliminando output/person_db/persons.pkl con el servidor apagado).
-    REID_RESET_POLICY: str = "never"           # [ANTES: daily]
+    #
+    # Por que dejo de ser "never" el defecto: `_best_in_gallery` compara el
+    # rostro contra TODA la galeria en un bucle de Python, asi que su coste
+    # crece con la gente acumulada. Medido en este repo (512-d, 5 plantillas
+    # por persona, 21-sep-2026): 100 personas -> 3.6 ms por busqueda; 2 000
+    # -> 67.6 ms; 5 000 -> 170.6 ms. El presupuesto de un frame a 15 fps es
+    # 66 ms para TODO, y la busqueda se paga una vez POR CADA cara del frame.
+    # En un pasillo de supermercado con ~200 personas/hora, "never" llega a
+    # ~2 400 en UN dia: el pipeline se para solo. Con TTL la galeria se
+    # estabiliza (~100 personas a 30 min) y el coste deja de crecer.
+    REID_RESET_POLICY: str = os.getenv(
+        "ELDE_REID_RESET_POLICY", "ttl").strip().lower()  # [ANTES: never]
+    # Vida de una persona en la galeria facial, en segundos, contada desde su
+    # `last_seen` (no desde que se la registro: quien sigue en el pasillo no
+    # caduca). Solo aplica con REID_RESET_POLICY="ttl".
+    #
+    # 30 min cubre de sobra un recorrido de supermercado (compra media 20-40
+    # min) sin acumular biometria de toda la jornada. Consecuencia que hay que
+    # tener presente al leer los tableros: con TTL se cuentan RECORRIDOS, no
+    # personas del dia — quien vuelve dos horas despues es un persistent_id
+    # nuevo y suma otra fila en `tienda_visitas`. Subirlo si se quiere unir
+    # visitas mas separadas, a costa de galeria (y de coste por busqueda).
+    REID_TTL_S: float = float(os.getenv("ELDE_REID_TTL_S", "1800"))
     # Path persistente de la base de datos
     REID_DB_PATH: str = "output/person_db/persons.pkl"
     # Threshold de confianza demografica minima para almacenar en la DB.
