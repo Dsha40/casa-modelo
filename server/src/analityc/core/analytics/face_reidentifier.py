@@ -47,6 +47,22 @@ from .config import AnalyticsConfig
 
 logger = logging.getLogger(__name__)
 
+#: Los generos que el voto por persona acepta.
+#:
+#: Tiene que coincidir con `_GENDER_LIST` de `demographics.py`, que es quien
+#: produce el valor que llega hasta aqui. Hasta el 22-sep-2026 esto estaba
+#: escrito dos veces y en PLURAL —('Hombres','Mujeres','Ninos')—, que es el
+#: vocabulario de `result['category']`, otro campo. Como `demographics.py`
+#: manda 'Hombre'/'Mujer' en SINGULAR, la condicion no se cumplia NUNCA:
+#: `votos_genero` quedaba vacio, la consolidacion por mayoria no llegaba a
+#: ejecutarse y el genero de cada persona se quedaba congelado en la PRIMERA
+#: lectura, que en un pasillo es la peor (cara de lejos y de perfil). La edad
+#: no tenia este filtro y por eso si se corregia sola.
+#:
+#: Va en una constante, y no repetido en los dos sitios que lo usan, porque
+#: fue justo esa duplicacion la que permitio que se desincronizara.
+_GENEROS_VOTABLES = ('Hombre', 'Mujer')
+
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity entre dos vectores (sin asumir normalizados)."""
@@ -757,7 +773,7 @@ class FaceReidentifier:
             _seed_votos = {}
             _seed_edades = []
             if (float(demo_confidence) >= _minv
-                    and gender in ('Hombres', 'Mujeres', 'Ninos')):
+                    and gender in _GENEROS_VOTABLES):
                 _seed_votos[gender] = float(demo_confidence)
             if float(demo_confidence) >= _minv and age_value and float(age_value) > 0:
                 _seed_edades = [float(age_value)]
@@ -819,7 +835,7 @@ class FaceReidentifier:
 
         # Acumular votos solo si la lectura es suficientemente confiable.
         if conf >= min_vote:
-            if gender in ('Hombres', 'Mujeres', 'Ninos'):
+            if gender in _GENEROS_VOTABLES:
                 votos = rec.setdefault('votos_genero', {})
                 votos[gender] = float(votos.get(gender, 0.0)) + conf
             if age_value and float(age_value) > 0:
