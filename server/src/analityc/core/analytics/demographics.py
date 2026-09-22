@@ -2452,7 +2452,18 @@ class DemographicsClassifier:
             "blur_medio_aceptado": blur_mean,
             "umbral_blur": umbral,
             "cero_borrosas_aceptadas": bool(cero_borrosas),
-            "rama_corporal_activa": (self._par is not None
+            # Cuenta MiVOLO v2 (`_estimador_cuerpo`), que desde el Hito 4 es
+            # la ruta PRINCIPAL de la rama corporal — el propio
+            # `_infer_body_only` la prueba ANTES que PAR y que el MiVOLO ONNX
+            # viejo. Hasta el 22-sep-2026 esta bandera solo miraba las dos
+            # vias legadas, asi que la telemetria decia `False` mientras la
+            # rama trabajaba: en un video real del pasillo salio `False` con
+            # 235 muestras corporales ACEPTADAS. Esa linea, leida junto al
+            # contador `body_sin_modelo`, lleva derecho a la conclusion falsa
+            # de que falta un modelo y a generar un PAR que el codigo nunca
+            # usaria (`_infer_body_only` ni lo mira si MiVOLO v2 esta).
+            "rama_corporal_activa": (self._estimador_cuerpo is not None
+                                     or self._par is not None
                                      or self._mivolo is not None),
             "rechazos_por_motivo": dict(self._q_reject),
             "total_rechazos": int(sum(self._q_reject.values())),
