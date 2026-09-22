@@ -446,8 +446,14 @@ class FaceReidentifier:
                         if p in muertos]:
                 del self._track_to_person[tid]
             self._session_expired_count += len(vencidas)
-            logger.debug("REID TTL: caducaron %d personas (ttl=%.0fs)",
-                         len(vencidas), self._ttl_s)
+            # INFO y no DEBUG (22-sep-2026): es la UNICA senal de que el TTL
+            # esta vivo, y el servidor corre en INFO, asi que no se veia. Para
+            # comprobar en produccion que la galeria caduca de verdad habia que
+            # subir todo el servidor a DEBUG. No inunda el log: solo se emite
+            # cuando alguien caduca de veras (`if vencidas`), o sea unas pocas
+            # lineas por hora con el TTL de 1800 s.
+            logger.info("REID TTL: caducaron %d personas (ttl=%.0fs)",
+                        len(vencidas), self._ttl_s)
         return len(vencidas)
 
     def _save_throttled(self):

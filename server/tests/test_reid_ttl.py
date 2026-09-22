@@ -21,8 +21,10 @@ milisegundos, igual que `test_stand_identidad.py`.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -354,3 +356,31 @@ def test_sin_offset_la_segunda_camara_hereda_la_identidad(db_path):
 
     assert a == b
     assert reid.total_unique_persons == 1
+
+
+# ── La senal en el log (22-sep-2026) ────────────────────────────────────
+
+def test_la_caducidad_se_anuncia_en_info(db_path, caplog):
+    """El aviso del TTL era `logger.debug` y el servidor corre en INFO.
+
+    Es la UNICA senal de que la galeria caduca de verdad: para comprobarlo en
+    produccion habia que subir TODO el servidor a DEBUG, con lo que eso
+    arrastra. El nivel es parte del contrato, no un detalle.
+
+    La prueba se verifica sola al reves: `caplog.at_level(INFO)` descarta los
+    DEBUG, asi que si alguien devuelve la linea a `logger.debug` la lista sale
+    vacia y esto falla.
+    """
+    reid = _reid(db_path)
+    uid = reid.identify_or_register(100001, _rostro(50))[0]
+    _envejecer(reid, uid, TTL + 1)
+
+    with caplog.at_level(
+            logging.INFO,
+            logger='src.analityc.core.analytics.face_reidentifier'):
+        quitadas = reid._caducar_locked(time.time())
+
+    assert quitadas == 1
+    lineas = [r.getMessage() for r in caplog.records
+              if r.levelno == logging.INFO and 'REID TTL' in r.getMessage()]
+    assert lineas == ['REID TTL: caducaron 1 personas (ttl=1800s)']
