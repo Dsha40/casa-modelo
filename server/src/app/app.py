@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import importlib.util
 import json
 import logging
 import os
@@ -142,11 +143,40 @@ def _arrancar_reporte_estacionamiento() -> None:
     permitidos = _pipelines_permitidos()
     if permitidos is not None and 'Estacionamiento' not in permitidos:
         return
+    # El corte de tiendas NO trae `estacionamiento_planificador`. Hasta el
+    # 22-sep-2026 su ausencia caia en el `except` de abajo y salia por
+    # `logger.exception`: un ERROR en rojo con traceback completo en CADA
+    # arranque del servidor, por algo que es exactamente lo mismo que
+    # `vigilante_amazonas` y `perimetral_nocturna` reportan como un WARNING de
+    # una linea. Asustaba sin motivo y tapaba los errores de verdad.
+    #
+    # Se mira ANTES si el modulo existe, en vez de reblandecer el `except`, para
+    # no perder el caso que si importa: en el monorepo el planificador SI esta,
+    # y si revienta al importarse (una dependencia suya rota, por ejemplo) el
+    # reporte diario del estacionamiento se pierde en silencio. Ese caso tiene
+    # que seguir saliendo como ERROR con su traza.
+    modulo = '..analityc.core.estacionamiento_planificador'
+    try:
+        presente = importlib.util.find_spec(modulo, package=__package__) is not None
+    except (ImportError, ValueError):
+        # find_spec no siempre devuelve None cuando algo falta, de ahi los dos:
+        #   ImportError -> tiene que importar los paquetes PADRE para mirar
+        #                  dentro, y `analityc.core` tampoco estuviera.
+        #   ValueError  -> el nombre ya esta en sys.modules pero sin `__spec__`
+        #                  (un modulo postizo, tipico de una prueba).
+        # Los dos significan lo mismo aqui: no hay planificador que arrancar.
+        presente = False
+    if not presente:
+        logger.warning(
+            'estacionamiento_planificador no disponible; el reporte diario del '
+            'estacionamiento no se programara')
+        return
     try:
         from ..analityc.core import estacionamiento_planificador as _plan
         _plan.planificador().iniciar()
     except Exception:                                       # noqa: BLE001
-        # Que falle no puede impedir servir frames; pero que se vea.
+        # Que falle no puede impedir servir frames; pero que se vea. El modulo
+        # EXISTE y aun asi no arranco: el reporte se perdio de verdad.
         logger.exception('no se pudo programar el reporte del estacionamiento')
 
 
