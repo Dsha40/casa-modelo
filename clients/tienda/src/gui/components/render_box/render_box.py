@@ -58,6 +58,7 @@ from elde_core.ui import identidad_camara as _identidad
 # ellos; amazonas arrastraba una copia anterior).
 from elde_core.ui.render_box_captura import CapturaDVRMixin
 from elde_core.ui.render_box_puerta import PuertaDireccionalMixin
+from elde_core.ui import overlay_munecas as _munecas
 from elde_core.ui.selector_local_camara import (
     SelectorLocalCamara, SIN_LOCAL_USA_EL_PIE)
 _DVR_MIME = "application/x-dvr-channel"
@@ -197,6 +198,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                  # del componente.
                  puerta_direccional=None,
                  puerta_boolean=False,
+                 # Pintar las munecas que manda el modo Anaqueles. Nace
+                 # APAGADO: es una ayuda de calibracion, no algo que deba
+                 # aparecer solo en la pantalla del operador.
+                 munecas_boolean=False,
                  **_legacy_kwargs,
                  ):
         super().__init__()
@@ -274,6 +279,12 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         # latencia/ancho de banda. _pending_frame_bytes guarda el JPEG en vuelo.
         self._direct_mode         = True
         self._pending_frame_bytes = None
+        # Munecas del modo Anaqueles (23-sep-2026): el ultimo juego recibido
+        # y CUANDO llego. La hora no es opcional: son un dibujo en vivo y un
+        # punto viejo clavado en pantalla miente mas que no pintar nada.
+        self._munecas_ultimas = []
+        self._munecas_ts = None
+        self._munecas_boolean = bool(munecas_boolean)
         # Overlay de Supervision (uno por camara: estelas/heatmap son per-camara).
         # Si no esta disponible queda None y se usa el dibujo con QPainter.
         self._sv_overlay = None
@@ -1028,6 +1039,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
              else f"Área {i + 1}")
             for i in range(n)]
 
+    def _toggle_munecas(self):
+        self._munecas_boolean = not self._munecas_boolean
+        self._save_all("munecas_boolean", self._munecas_boolean)
+
     def _toggle_vlm(self):
         """Activa/desactiva el verificador de eventos (Etapa 2) en el servidor.
         El estado viaja en el payload websocket; el servidor hace lazy-load
@@ -1117,6 +1132,11 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         menu.clear()
         self._add_toggle(menu, "Estelas de movimiento",
                          self.trace_boolean, self._toggle_trace)
+        # Va en Vista y no en Area: no dibuja geometria, ensenia lo que el
+        # servidor ESTA viendo. Solo pinta algo en modo Anaqueles, que es el
+        # unico que manda munecas.
+        self._add_toggle(menu, "Munecas del anaquel (diagnostico)",
+                         self._munecas_boolean, self._toggle_munecas)
         self._add_toggle(menu, "Cajas estilo elipse",
                          self.ellipse_style, self._toggle_box_style)
 
@@ -1492,6 +1512,17 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             self.text_size.setText(f"{w}x{h}")
         self._apply_label_pixmap(pixmap)
 
+    def _munecas_a_pintar(self):
+        """Las munecas vigentes, o vacio si estan apagadas o caducadas.
+
+        Un solo sitio decide: los dos caminos de pintado (Supervision y
+        QPainter) tienen que enseniar LO MISMO, o el operador veria una cosa
+        distinta segun lo que tenga instalado."""
+        if not self._munecas_boolean:
+            return []
+        return _munecas.vigentes(self._munecas_ultimas, self._munecas_ts,
+                                 time.time())
+
     def _try_supervision_overlay(self, detections):
         """Anota con Supervision (cajas/estelas/zonas/heatmap). True si lo logro;
         False -> el caller cae al dibujo con QPainter."""
@@ -1507,6 +1538,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                 getattr(self, "heatmap_boolean", False))
             zones = self._active_zone_polygons(w, h)
             annotated = self._sv_overlay.annotate(frame, detections, zones)
+            # DESPUES de Supervision: las munecas son la capa de diagnostico
+            # y tienen que quedar por encima de las cajas y el heatmap.
+            _munecas.pintar_cv2(annotated, self._munecas_a_pintar())
             self._show_bgr(annotated)
             return True
         except Exception as e:
@@ -1549,6 +1583,7 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                     painter.fillRect(x1, ty - th, tw + 6, th, QColor(0, 0, 0))
                     painter.setPen(QColor(255, 255, 255))
                     painter.drawText(x1 + 3, ty - 4, label)
+            _munecas.pintar_qt(painter, self._munecas_a_pintar())
             painter.end()
         except Exception as e:
             print(f"draw detections error: {e}")
@@ -1679,6 +1714,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                 # sepa de quien es; los clientes en otro modo no lo reciben
                 # nunca (el servidor solo lo construye en Anaqueles).
                 bloque_anaqueles = metadata.get("anaqueles")
+                if bloque_anaqueles and bloque_anaqueles.get("munecas"):
+                    self._munecas_ultimas = bloque_anaqueles["munecas"]
+                    self._munecas_ts = time.time()
                 if bloque_anaqueles:
                     self.anaqueles_received.emit({
                         **bloque_anaqueles,

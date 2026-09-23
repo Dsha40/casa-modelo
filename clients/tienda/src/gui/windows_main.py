@@ -252,6 +252,9 @@ class MainWindow(QMainWindow):
                                                      None),
                 puerta_boolean             = cfg.get("puerta_boolean", False),
                 anaqueles_numeros          = cfg.get("anaqueles_numeros", []),
+                # Munecas del anaquel: ayuda de calibracion, apagada por
+                # defecto y persistida por camara como el resto de la vista.
+                munecas_boolean            = cfg.get("munecas_boolean", False),
                 asignar_numero_anaquel     = self._asignar_numero_anaquel,
                 liberar_numero_anaquel     = self._liberar_numero_anaquel,
                 vlm_enabled_boolean        = cfg.get("vlm_enabled_boolean", False),

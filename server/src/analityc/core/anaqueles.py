@@ -290,6 +290,13 @@ class MedidorAnaqueles:
         self._feed_sucio = False
         self._ultimo_emitido: Dict[str, float] = {}
 
+        #: Munecas vistas en ESTE frame, para que el operador las vea en el
+        #: recuadro mientras calibra (23-sep-2026). Es lo unico del bloque
+        #: que NO lleva throttle: con 2 s de retraso el punto se pinta donde
+        #: la mano YA no esta, que es peor que no pintarlo. Se repone en
+        #: cada frame — nunca acumula.
+        self._munecas_frame: List[Dict[str, Any]] = []
+
     # ── Zonas ───────────────────────────────────────────────────────────
     def poner_zonas(self, zonas: Sequence[Sequence[Sequence[float]]],
                     nombres: Sequence[str]) -> None:
@@ -392,6 +399,7 @@ class MedidorAnaqueles:
                 "cámara vuelva a la escena de las áreas dibujadas",
                 self.camera_id, veredicto)
 
+        self._munecas_frame = []
         personas = self._personas_de(tracks)
         # El PERSONAL enrolado se separa ANTES de medir: el marketing es
         # solo de clientes. Sus visitas/agarres no cuentan, no calientan el
@@ -953,6 +961,28 @@ class MedidorAnaqueles:
                     prof_de[(idx, lado)] = cv2.pointPolygonTest(
                         poli, (mx, my), True)
 
+            # Para el recuadro del operador: la muneca con su profundidad
+            # respecto al area (positiva = dentro). Se toma AQUI porque es
+            # donde ya esta calculada: pedir la pose otra vez para dibujar
+            # duplicaria el coste del modelo.
+            for lado, (mx, my) in vistos.items():
+                mejor = max(
+                    ((idx, prof_de.get((idx, lado), -1e9))
+                     for idx in areas_de_pid),
+                    key=lambda par: par[1], default=(None, None))
+                self._munecas_frame.append({
+                    'x': round(float(mx), 1), 'y': round(float(my), 1),
+                    'lado': lado,
+                    'area': mejor[0],
+                    'prof': (round(float(mejor[1]), 1)
+                             if mejor[1] is not None else None),
+                    'dentro': bool(
+                        mejor[1] is not None
+                        and mejor[0] is not None
+                        and mejor[1] >= self._profundidad_efectiva(
+                            ancho_bbox, mejor[0])),
+                })
+
             # 1) Arbitraje de PENDIENTES de este pid (áreas apiladas): el
             #    conteo del frame anterior se confirma salvo que la mano
             #    haya seguido de largo hacia OTRO nivel.
@@ -1224,6 +1254,13 @@ class MedidorAnaqueles:
                     personas_por_area.get(fila['idx'], 0))
             bloque['areas'] = resumen
             bloque['sin_areas'] = not self._poligonos
+
+        # Las munecas van SIN throttle y solo cuando las hay: es un dibujo
+        # en vivo. El panel de anaqueles ignora las claves que no conoce
+        # (`actualizar` lo lee todo con guardas), asi que un cliente viejo no
+        # se entera de que existen.
+        if self._munecas_frame:
+            bloque['munecas'] = list(self._munecas_frame)
 
         if self._feed_sucio:
             bloque['eventos'] = list(self._feed)
