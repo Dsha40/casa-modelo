@@ -1,11 +1,16 @@
 # CLAUDE.md — ELDE Tiendas (contexto de trabajo)
 
-Traspaso de las sesiones del 16-18 y 21-22 sep 2026. **Este archivo SÍ se
-commitea** (antes era local): vive en la rama para que la siguiente sesión lo
-lea sin que el usuario tenga que pegarlo.
+Traspaso de las sesiones del 16-18 sep, 21-22 sep y 23-sep 2026. **Este
+archivo SÍ se commitea**: vive en la rama para que la siguiente sesión lo lea
+sin que el usuario tenga que pegarlo.
 
-Rama de trabajo actual: **`claude/pensive-galileo-aymjr3`**, que cuelga de
-`fix/eliminar_vigilantes_amazonas` (no de `main`).
+Rama de trabajo actual: **`fix/gender`** (publicada), que cuelga de
+`claude/pensive-galileo-aymjr3` → `fix/eliminar_vigilantes_amazonas` (no de
+`main`). Al cambiarte a ella heredas todo lo anterior.
+
+**El 23-sep se midió por primera vez sobre PRODUCCIÓN REAL** (14 h de log y la
+base del usuario), y eso corrigió conclusiones que venían de muestras cortas.
+Donde este archivo dé una cifra, mira su fecha: las del 23-sep mandan.
 
 ---
 
@@ -29,28 +34,48 @@ Claude y el servidor a la vez**. Toda validación en vivo llega como log pegado.
 
 ### Cómo montar el entorno de pruebas en el contenedor
 
-No viene nada instalado. Esto bastó el 21-sep para correr la suite completa
-(el índice de PyTorch está bloqueado por el proxy; **torch hay que sacarlo de
-PyPI**):
+No viene nada instalado. Esto deja la suite **entera en verde** (el índice de
+PyTorch está bloqueado por el proxy; **torch hay que sacarlo de PyPI**):
 
 ```bash
-pip install numpy pytest opencv-contrib-python-headless fastapi msgpack \
-            supervision torch httpx onnxruntime rfdetr psutil py-cpuinfo \
-            python-multipart
+# La version de OpenCV NO es opcional: ver abajo.
+pip install numpy pytest "opencv-contrib-python-headless==4.12.0.88" fastapi \
+            msgpack supervision torch httpx onnxruntime rfdetr psutil \
+            py-cpuinfo python-multipart reportlab timm torchreid gdown \
+            tensorboard
+# Los pesos van por Git LFS y git-lfs NO viene en el contenedor:
+apt-get install -y git-lfs && git lfs install --local && git lfs pull
 cd server && python3 -m pytest tests -q
 ```
 
-**Línea base medida el 22-sep: `767 passed, 15 skipped, 4 failed`.** Los 4
-fallos son **del contenedor, no del código**, y salen igual antes y después de
-cualquier cambio:
+**Línea base medida el 23-sep: `792 passed, 15 skipped, 0 failed`.**
 
-- `test_informe_pdf.py` (3) → `ModuleNotFoundError: No module named 'reportlab'`
-- `test_pose_motor.py` (1) → `AssertionError: el modelo local debió cargar sin
-  red` (faltan los pesos de Git LFS)
+La línea base vieja («767 passed, 4 failed, los 4 son del contenedor») **está
+obsoleta**: 3 fallos eran por `reportlab` y 1 por los pesos de Git LFS. Con
+esas dos cosas instaladas **no hay ningún fallo aceptable**. Si ves uno, es
+tuyo.
 
-Compáralos siempre contra esa línea base antes de dar un cambio por bueno.
-`conftest._NO_APLICAN` salta 5 pruebas de otros verticales; las otras 10 del
-total de 15 vienen de otros `skip` del repositorio.
+**Dos trampas que costaron horas el 23-sep:**
+
+1. **`opencv-contrib-python-headless` SIN versión te da la 5.x, y eso tumba
+   TODO el stack facial**, no solo lo que quita. `tiendas_modelos.py:278` carga
+   todos los modelos dentro de **un solo `try/except`**, y el primer `readNet`
+   de los modelos Caffe viejos revienta en OpenCV 5 («Caffe importer has been
+   removed») llevándose por delante YuNet, InsightFace, ArcFace y OSNet. El
+   síntoma es demoledor: el servidor arranca «bien» y no reconoce a nadie.
+   Comprobación: `p._reidentifier.is_available` y `p._demographics.is_available`
+   deben dar `True`.
+2. **Sin los pesos de Git LFS no hay pipeline.** Se descargan sin problema
+   desde el contenedor; lo que falta es el binario `git-lfs`.
+
+Comprobación oficial del README (debe imprimir la línea, sin reventar):
+
+```bash
+python3 -c "import cv2, torch, onnxruntime, rfdetr, transformers, supervision, torchreid; assert hasattr(cv2,'ximgproc'); print('cv2', cv2.__version__)"
+```
+
+`verificar_entorno.py` sale con **código 1 en el contenedor** (no hay GPU) y
+con **0 en el Linux del usuario**. No es un fallo: el script hace su trabajo.
 
 ---
 
@@ -69,21 +94,31 @@ de escritorio) y **se está ajustando a un proyecto nuevo de tiendas**. Por eso:
 - Lo que se usa hoy: el cliente `clients/tienda` capturando ventanas de
   iVMS-4200, el modo `Tiendas`, el servidor en Linux y `/dashboards/tienda/`.
 
-### El caso de uso real (contexto que faltaba en el doc anterior)
+### El caso de uso real
 
-**Un pasillo de anaqueles de supermercado**, con **dos cámaras del mismo
-pasillo funcionando a la vez** (`win-iVMS-4200-i58bf7b` y
-`win-iVMS-4200-c2-i58bf7b`). Pasa mucha gente. Eso importa para las
-decisiones de diseño: la gente **mira los productos, no la cámara**, y las
-caras del fondo del pasillo miden ~20 px.
+**Un pasillo de anaqueles de supermercado.** Pasa mucha gente. La gente
+**mira los productos, no la cámara**, y las caras del fondo miden ~20 px.
 
-Hay además una tercera «cámara» que es **un vídeo de YouTube de prueba**
-(`win-HD_CCTV_Camera_video_3MP_4MP_iProx_CCTV_HDCCTVCameras.net_retail_store-i58bf7b`).
-No la confundas con una cámara real: su imagen está doblemente comprimida y
-**rechaza prácticamente todas las caras**. Medido el 21-sep: en ese vídeo los
-rechazos por `calidad` (nitidez) eran el **26,8 %**; en la cámara real, el
-**3,1 %**. Si el usuario pega un log, pregunta de qué fuente es antes de
-concluir nada.
+**Estado real del montaje (23-sep) — no asumas que las cuatro funcionan:**
+
+| Cámara | `camera_id` | Estado | Personas en base |
+|---|---|---|---:|
+| 1 | `win-iVMS-4200-i58bf7b` | estable | 203 |
+| 2 | `win-iVMS-4200-c2-i58bf7b` | estable | 89 |
+| 3 | `win-iVMS-4200-c4-i58bf7b` | **intermitente**: se cae y vuelve | 19 |
+| 4 | — | **no funciona** (error `OpenSDK 105` de reconexión) | 0 |
+| prueba | `win-HD_CCTV_Camera_...` | vídeo de YouTube, NO es una cámara | 3 |
+
+Las 19 personas de la c4 frente a 203 y 89 son la huella de la intermitencia.
+
+**Las imágenes van DESFASADAS entre cámaras** (observado por el usuario, no
+medido). Importa: enlazar a la misma persona entre dos cámaras es más fácil si
+ambas la ven a la vez. Es candidato a explicar por qué solo 47 de 292
+apariciones se enlazan, pero **no está comprobado**.
+
+El vídeo de prueba está doblemente comprimido y **rechaza casi todas las
+caras** (rechazos por nitidez: 26,8 % ahí frente a 3,1 % en la cámara real).
+Si el usuario pega un log, **pregunta de qué fuente es antes de concluir**.
 
 ---
 
@@ -126,8 +161,17 @@ con `archivo:línea`.
   `fallo_imagen_IA_pipeline`).
 - **Nunca uses credenciales pegadas en el chat.** Ya pegó un token de GitHub
   (lo revocó). Que se autentique él.
-- **Los `git push` sí los haces tú ahora.** Si tienes que reescribir un commit
-  ya publicado (`--amend`, rebase), **avísale**: él tendrá que hacer
+- **PIDE PERMISO ANTES DE CADA COMMIT Y DE CADA PUSH.** Lo exigió el 22-sep,
+  después de que una sesión commiteara y publicara dos arreglos por su cuenta
+  amparándose en la línea que había aquí («los push los haces tú ahora»). Su
+  motivo: no quiere que se le llene el historial de GitHub. Puedes **editar**
+  los archivos libremente; lo que no haces sin su visto bueno es fijar el
+  cambio. El procedimiento, cada vez:
+  1. enséñale **qué archivos** tocas y el resumen del diff,
+  2. enséñale **el mensaje de commit completo**, tal y como iría,
+  3. **espera su respuesta**. Sin ella, ni `commit` ni `push`.
+- Si tienes que reescribir un commit ya publicado (`--amend`, rebase),
+  **avísale** además de pedir permiso: él tendrá que hacer
   `git reset --hard origin/<rama>` en vez de un `pull` normal.
 
 ### Convenciones del repositorio
@@ -148,7 +192,8 @@ con `archivo:línea`.
 
 ## Errores cometidos (no los repitas)
 
-Cuatro de la sesión del 21-22 sep, todos detectados y corregidos:
+Cinco de las sesiones del 21-22 sep y dos del 23, todos detectados y
+corregidos:
 
 1. **`git checkout -- <archivo>` sobre trabajo sin commitear lo BORRA.** Se
    usó para deshacer una línea de prueba y se llevó el cambio entero. Si
@@ -163,6 +208,25 @@ Cuatro de la sesión del 21-22 sep, todos detectados y corregidos:
 4. **Las cifras de `CALIDAD FACIAL` son acumuladas**, no instantáneas (ver
    abajo). Se compararon dos líneas de sesiones distintas como si fueran
    mediciones independientes.
+
+5. **Commitear y publicar sin preguntar.** Ocurrió el 22-sep con dos arreglos
+   correctos y probados: el problema no fue el código, fue el procedimiento.
+   El `CLAUDE.md` decía «los `git push` sí los haces tú ahora» y se tomó por
+   permiso permanente. **No lo es.** Ver la regla, con sus pasos, en «Cómo
+   trabajar con este usuario».
+
+6. **Recomendar el modelo PAR fiándose de una telemetría rota.** El indicador
+   `rama_corporal_activa` decía `False` mientras la rama corporal había
+   aceptado 235 muestras, y el contador `body_sin_modelo` sugiere «falta un
+   modelo» cuando cuenta «el modelo corrió y no dio resultado válido». Con esos
+   dos se le dijo al usuario que generara un PAR **que el código nunca habría
+   usado**. Arreglado en `576e53a`. Lección: **una bandera de telemetría es
+   código como el resto y puede estar desactualizada**; contrástala con un
+   contador que no dependa de ella.
+7. **Concluir «el muro es la pose, 48 %» desde 51 segundos de vídeo.** Con 14 h
+   de producción el reparto real es **37,7 % tamaño y 13,6 % pose**. El tramo
+   corto tenía gente pasando cerca. **No saques repartos porcentuales de
+   muestras de minutos**: saca el dato del log acumulado, que cubre jornadas.
 
 Y uno de método que sí salió bien y conviene repetir: **verificar los tests al
 revés**. Desactiva el arreglo y comprueba que la prueba falla; luego
@@ -293,7 +357,46 @@ con mediciones reales. El 9-sep `device_id()` estrenó el sufijo de instalación
 
 ---
 
-## Lo que se aprendió midiendo (21-22 sep)
+### Sesión 23-sep — rama `fix/gender`
+
+**`f7af573` — Conectar el voto de género, que nunca contaba un voto.**
+
+`_maybe_update_demographics` agrega el género por voto ponderado, pero el
+filtro pedía `('Hombres','Mujeres','Ninos')` —el vocabulario de
+`result['category']`, que sirve para PINTAR— y `demographics.py` manda
+`'Hombre'/'Mujer'`. La condición no se cumplía nunca: `votos_genero` quedaba
+vacío y la consolidación por mayoría **no llegaba a ejecutarse**.
+
+El efecto no era solo perder la mayoría: sin votos el género quedaba
+**CONGELADO en la primera lectura** (la peor: de lejos y de perfil), y encima
+se propagaba, porque `demographics.py:1371` impone a propósito el valor
+guardado al reconocer a alguien. **La edad no tenía ese filtro y por eso sí se
+corregía sola.**
+
+Se cambió el vocabulario del FILTRO, no la llamada: pasar `category` habría
+metido un tercer valor en un campo de dos que leen **~30 sitios** (dashboard,
+informe PDF, la columna `genero` de `tienda_visitas`) y habría mezclado
+'Hombre' con 'Hombres' en la base. Va en la constante `_GENEROS_VOTABLES`
+porque fue la duplicación la que permitió que se desincronizara. 11 pruebas.
+
+**`576e53a` — Contar MiVOLO v2 en la bandera de la rama corporal.**
+
+`rama_corporal_activa` miraba solo `_par` y el MiVOLO ONNX viejo, no
+`_estimador_cuerpo` (MiVOLO v2), que desde el Hito 4 es **la ruta principal** y
+la que `_infer_body_only` prueba PRIMERO. 4 pruebas, una de ellas fija ese
+ORDEN sobre el código: si alguien lo invirtiera, generar el PAR volvería a
+tener sentido y la recomendación de no hacerlo dejaría de ser cierta.
+
+**Confirmado en producción (23-sep):** `REID TTL: caducaron 1 personas
+(ttl=1800s)` — con el TTL REAL de 30 min, no con los 60 s de prueba. Eso cierra
+el pendiente «validar el TTL con los 30 minutos reales».
+
+---
+
+## Lo que se aprendió midiendo
+
+Ordenado de menos a más fiable: primero lo de muestras cortas (21-22 sep),
+después **lo medido sobre producción el 23-sep, que es lo que manda**.
 
 ### La telemetría `CALIDAD FACIAL` es la métrica buena
 
@@ -335,54 +438,102 @@ Y por debajo hay un muro que ningún perfil salva — `DEMO_ADAPTIVE_BRACKETS`
 La foto real del pasillo da **blur 2 915 en la cara nativa** y ~310 tras
 alinear: la cámara real está bien. El problema es la distancia, no la imagen.
 
-### Efecto medido del perfil (22-sep, cámara real, muestras pequeñas)
+### LO QUE MANDA: 14 h de producción (23-sep)
 
-| Motivo | Antes | Después |
+Log de `00:10` a `14:28`, 13.082 líneas, 18.800 intentos sobre dos cámaras.
+**Tasa de aceptación: 8 %.** Esto sustituye a cualquier reparto sacado de
+muestras de minutos.
+
+| Motivo | Casos | % |
 |---|---:|---:|
-| `bbox_pequeno` | 30,9 % | **14,9 %** ↓ |
-| `sin_cara` | 10,5 % | 19,3 % ↑ |
-| `body_conf_baja` | 0,5 % | 10,5 % ↑ |
-| `ensemble_tta` | 22,5 % | 23,7 % (igual) |
-| **aceptación** | 14,7 % | 9,6 % |
+| **tamaño** (`bbox_pequeno` + `body_bbox_pequeno`) | **6.523** | **37,7 %** |
+| `sin_cara` | 3.357 | 19,4 % |
+| `pose` | 2.355 | 13,6 % |
+| `body_sin_modelo` (NO es «falta el modelo») | 1.904 | 11,0 % |
+| `calidad` | 1.339 | 7,7 % |
+| `ensemble_tta` | 935 | 5,4 % |
+| `body_conf_baja` | 872 | 5,0 % |
 
-**El perfil hace lo que promete** (el rechazo por bbox cae a la mitad), pero
-**el embudo se desplaza**: la gente que antes se cortaba al principio ahora
-llega más lejos y cae igual, porque no tiene cara utilizable. Las muestras son
-de minutos y con tráfico distinto: **indicativo, no concluyente**.
+**Cuando falla la pose, SIEMPRE es giro horizontal:** perfil 3.161 + girada 970
++ yaw 1.565 = 5.696, contra pitch 14 y roll 0. Arriba/abajo e inclinación no
+cuentan. `DEMO_DEBUG_REJECTIONS` está activo, así que el log guarda el motivo
+de cada cara: `grep -c 'RECHAZO eye_ratio' server/logs/server.log`.
 
-### Identidad entre cámaras: CONFIRMADA en producción
+Ojo al encadenar números: una cara rechazada por perfil **cae luego a la rama
+corporal** y solo si esa también falla cuenta como `sin_cara`
+(`demographics.py:1180-1186`). No sumes pose + sin_cara.
+
+### LA CAUSA Nº 1: el listón, no la imagen (23-sep)
+
+Cada captura guarda por qué no se pudo estimar el perfil. Sobre 1.343 fichas:
+
+| Motivo | Casos | % |
+|---|---:|---:|
+| **`muestras_insuficientes`** | **718** | **53 %** |
+| `sin_rostro` | 489 | 36 % |
+| `calidad_insuficiente` | 67 | 5 % |
+| `rostro_muy_pequeno` | 52 | 4 % |
+
+`muestras_insuficientes` = se le vio la cara, se tomaron muestras y **nunca
+llegaron al listón**: `DEMO_MIN_SAMPLES=5`, `DEMO_MIN_CONFIDENCE=0.85`,
+`DEMO_MIN_MARGIN=0.35`, `DEMO_COMMIT_AGREE_RATIO=0.90` (`config.py`, en modo
+«precisión máxima»; el perfil de cámara tiene PROHIBIDO tocarlos).
+
+**Es la palanca más rentable del proyecto: la causa mayoritaria y la única que
+se mueve cambiando números.** No se ha probado todavía.
+
+### EL FALLO MÁS GORDO: el panel y la base no exigen lo mismo (23-sep)
+
+En `tiendas_fotos.py:552-566`, la alerta al cliente se emite **sin condición**
+y el guardado en base solo **`if _pid_demo`** (el `person_uuid`). Y
+`person_uuid` solo se rellena por la vía de re-identificación facial
+(`demographics.py:911` y `:1378`).
+
+Resultado medido sobre 1.474 capturas:
 
 ```
-2026-09-22   vista en 2 camara(s): 1 personas
+con género .... 131      →   con identidad ...  12
+                             SIN identidad ... 119   ← se pierden
 ```
 
-Una persona real reconocida por las dos cámaras del pasillo con el mismo
-`persistent_id`. Consulta para reproducirlo:
+**Se pierde el 91 % de lo clasificado.** El panel enseña 131 y los informes
+salen de 12. **Por qué falta la identidad NO se ha medido**: el campo
+`origen_demografia` sale vacío en las 131 fichas.
 
-```sql
-SELECT jornada, camaras, COUNT(*) FROM (
-  SELECT jornada, persistent_id, COUNT(DISTINCT camera_id) AS camaras
-  FROM tienda_visitas WHERE camera_id LIKE 'win-iVMS%'
-  GROUP BY jornada, persistent_id) GROUP BY jornada, camaras;
-```
+Decisión pendiente del usuario: `tienda_visitas` exige `persistent_id`, así que
+guardar a los 119 obliga a elegir entre inventarles uno (y perder el conteo
+único) o guardarlos aparte como «visita sin identificar».
 
-**Límite estructural del caso de uso:** para *registrar* a alguien hace falta
-una cara semi-frontal (`REID_MAX_YAW_FOR_REGISTRATION = 20°`). En un pasillo
-de anaqueles la gente mira los productos. Lo que movería la aguja de verdad es
-**una cámara a la altura de la cara en la entrada del pasillo** que haga el
-registro, dejando a las demás solo re-identificar (mucho más tolerante).
+### Identidad entre cámaras: funciona a escala (23-sep)
 
----
+| Vista por | Personas |
+|---|---:|
+| 1 cámara | 245 |
+| 2 cámaras | 43 |
+| 3 cámaras | 4 |
 
-## Hallazgos pendientes (18-sep, revisados el 22-sep)
+**47 personas enlazadas entre cámaras**, no 1 como el 22-sep. La parte difícil
+funciona. Y por eso mismo **el doble conteo ya está medido**: sumar por cámara
+da **314**, unir identidades da **261** → **53 personas de más, un 20 %**.
+Eso cierra los hallazgos 1 y 13, que llevaban desde el 18-sep sin medirse.
+
+**Ojo con `tienda_capturas`:** es una **caché perezosa** que solo se llena al
+abrir el panel de capturas. Si sale vacía no significa que no haya capturas.
+La fuente de verdad son los sidecars JSON en disco.
+
+**Límite estructural:** para *registrar* hace falta cara semi-frontal
+(`REID_MAX_YAW_FOR_REGISTRATION = 20°`). En un pasillo la gente mira el
+producto.
+
+## Hallazgos pendientes (18-sep, revisados el 23-sep)
 
 Antes de citar uno, **comprueba que el código sigue igual**. Los que llevan
 ✅ se resolvieron; los demás siguen vivos con sus líneas actualizadas.
 
-1. **Persona en dos cámaras:** visitantes únicos 1 (bien), entradas 2, género y
-   edad globales 2 (mal: `tienda_almacen.demografia`, `tienda_almacen.py:568`,
-   suma por cámara). **Ahora hay un caso real en la base** (22-sep) para
-   medirlo. Ningún test lo cubre.
+1. **Persona en dos cámaras — MEDIDO el 23-sep, sigue sin arreglar.**
+   `tienda_almacen.demografia` (`:568`) suma por cámara en vez de unir. El
+   coste real: **314 frente a 261, 53 personas de más, 20 %**. Ningún test lo
+   cubre. Va de la mano del 13.
 2. **Jarvis:** `render_box.py` rehace la alerta sin `person_uuid` ni
    `camera_name`, y `jarvis_forwarder.py` agrupa todas con `('obj','?:?')`.
    Solo importa si usan Jarvis.
@@ -412,50 +563,91 @@ Antes de citar uno, **comprueba que el código sigue igual**. Los que llevan
 
 ### Hallazgos nuevos del 21-22 sep
 
-13. **`dashboard.py:244`:** sin clientes conectados, la rama de disco hace
-    `visitantes = sum(...)` sobre los informes por cámara en vez de unir
-    UUIDs → **duplica a quien cruza dos cámaras**. La rama en vivo sí lo hace
-    bien (`:228` `unicos |= ...`, `:238` `len(unicos)`). Con las dos cámaras
-    del pasillo, este bug ya tiene un caso real que lo dispara.
+13. **`dashboard.py:244` — MEDIDO el 23-sep, sigue sin arreglar.** Sin
+    clientes conectados hace `visitantes = sum(...)` en vez de unir UUIDs. La
+    rama en vivo sí lo hace bien (`:228`, `:238`). Mismo 20 % del hallazgo 1.
+    La API `/api/v1/tienda` **sí lo hace bien** (`tienda_almacen.py:465`,
+    `COUNT(DISTINCT persistent_id)`): el que falla es el dashboard viejo.
 14. **`_best_in_gallery` es O(N) en Python puro** y `_cosine_similarity`
     renormaliza vectores que ya vienen normalizados. Un producto matricial da
     **250-300× más rápido**. Con el TTL ya no urge.
-15. **`ERROR` rojo en cada arranque:** `estacionamiento_planificador` no existe
+15. ✅ **`ERROR` rojo en cada arranque** — resuelto en `eb10ef5`. Era: `estacionamiento_planificador` no existe
     en este corte y `app.py:150` lo saca con `logger.exception` (traceback
     completo), cuando `vigilante_amazonas` y `perimetral_nocturna` salen como
     un `WARNING` de una línea. Cosmético, pero asusta.
-16. **`REID TTL: caducaron N` es `logger.debug`**
+16. ✅ **`REID TTL: caducaron N` era `logger.debug`** — resuelto en `2dd7267`. Era:
     (`face_reidentifier.py:449`): no se ve con nivel INFO.
 17. **`GET /vlm/model` ×16 en un segundo** desde el cliente. Polling agresivo.
-18. **Modelo PAR ausente:** `models/classifiers/par_gender.onnx` no está, y
-    `body_sin_modelo` fue el **6-11 %** de los rechazos. `scripts/setup_modelos.py`
-    lo genera (verificado que el script existe; **no se ha ejecutado**).
+18. ❌ **OBSOLETO — NO generes el modelo PAR.** `_infer_body_only`
+    (`demographics.py:1803-1815`) prueba `_estimador_cuerpo` (MiVOLO v2)
+    PRIMERO y solo mira `_par` si aquel falta. MiVOLO v2 **está instalado y
+    activo** (`disponible: True, backend: pytorch, dispositivo: cuda`), así que
+    el PAR nunca se usaría. `setup_modelos.py` y el contador `body_sin_modelo`
+    siguen diciendo lo contrario: **están desactualizados, no les hagas caso**.
+
+### Hallazgos nuevos del 23-sep
+
+19. **El panel y la base no exigen lo mismo → se pierde el 91 %.** Ver arriba,
+    «EL FALLO MÁS GORDO». Es el de mayor impacto del proyecto.
+20. **Las capturas se escriben en una ruta y se leen en otra.**
+    `AnalyticsConfig.CAPTURE_DIR` es RELATIVA: quien escribe
+    (`tiendas_fotos.py:126`) la usa tal cual, contra el directorio de trabajo;
+    quien lee (`tienda_capturas.py:73-78`) la ancla a `server/`. Como el
+    arranque **no hace `chdir`**, las fotos acaban en `<raíz>/output/captures/`
+    y se buscan en `server/output/captures/`. Medido: **2.948 ficheros en la
+    primera, la segunda no existe**. El panel de Capturas del cliente marca
+    **0** con 1.474 capturas en disco, y `tienda_capturas` nunca se llena.
+21. **Un `try/except` gigante tumba todo el stack facial.**
+    `tiendas_modelos.py:278` carga Caffe, YuNet, InsightFace, ArcFace y OSNet
+    dentro del mismo bloque. Cualquier fallo en el primero se lleva a los
+    demás. Con OpenCV 5 pasa de verdad. Conviene separar el legado del resto.
+22. **Tres sitios afirman que la rama corporal está apagada y mienten:**
+    `setup_modelos.py` (su resumen), el contador `body_sin_modelo` (cuenta
+    «corrió y no valió») y `rama_corporal_activa` (✅ arreglado en `576e53a`).
+    Los dos primeros siguen vivos.
+23. **`site_id` sin configurar.** El log dice `server/sitio-unico`. No rompe
+    nada, pero sin él los dashboards no pueden comparar sucursales.
 
 ---
 
 ## Pendientes, por prioridad
 
-1. **Hallazgo 13** (`dashboard.py` suma en vez de unir). Es un bug de conteo
-   real y el caso que lo dispara ya está en la base del usuario.
-2. **Generar el modelo PAR** (hallazgo 18). Lo hace el usuario en su Linux;
-   ataca directamente el cuello de botella del pasillo.
-3. **Hallazgos 15 y 16** (el `ERROR` del arranque y el log del TTL a INFO).
-   Cinco minutos cada uno, ya ofrecidos al usuario.
-4. **Decisiones suyas, sin prisa:**
+1. **Aflojar el listón de consolidación y MEDIRLO.** Es la causa nº 1 (53 %) y
+   la única que se mueve sin comprar nada. El arreglo del voto (`f7af573`) hace
+   este cambio más seguro que antes, porque ahora el sistema sí puede
+   corregirse con las lecturas siguientes. Se puede medir con el vídeo del
+   usuario antes de tocar la tienda. **Nadie lo ha probado todavía.**
+2. **Decidir qué hacer con los 119 que se pierden** (hallazgo 19). Bloqueado
+   por el usuario: hay que elegir qué significa «visitante».
+3. **La ruta de las capturas** (hallazgo 20). Pequeño y desbloquea el panel de
+   Capturas, que hoy no sirve.
+4. **El doble conteo** (hallazgos 1 y 13). Ya medido: 53 personas, 20 %.
+5. **Decisiones suyas, sin prisa:**
    - **La semántica del número.** Con TTL se cuentan **recorridos**, no
-     personas del día: quien vuelve pasados 30 min es un `persistent_id`
-     nuevo. El dashboard sigue diciendo «visitantes únicos». Conviene
-     renombrar la columna.
-   - **El panel de personas** ahora muestra la ventana viva de 30 min, no un
-     histórico. Está pendiente de que lo vea y lo apruebe.
-   - **El destino de la rama:** ¿la integra él a `fix/...` o se abre un PR?
-5. **Validar el TTL con los 30 minutos reales.** Solo se comprobó con
-   `ELDE_REID_TTL_S=60`.
-6. **Aplazados por el usuario el 18-sep** (no los empieces sin que lo pida):
-   vídeo que no se congela si la IA falla (hallazgo 7), y qué contar
-   exactamente entre cámaras (hallazgo 1).
-7. **Escáner de ventanas**, propuesto y pendiente de aprobación. Toca
-   `packages/elde_core` (compartido): va en rama propia.
+     personas del día. El dashboard sigue diciendo «visitantes únicos».
+   - **El destino de la rama `fix/gender`:** ¿la integra, se abre un PR?
+6. **Cosas del montaje, no del código:** dos cámaras caídas, una intermitente,
+   el desfase de imagen y la calibración (el perfil que se aplica hoy se hizo
+   en agosto mirando OTRA escena, el stand de charcutería).
+7. **Aplazados por el usuario** (no los empieces sin que lo pida): vídeo que no
+   se congela si la IA falla (hallazgo 7), y qué contar entre cámaras.
+8. **Escáner de ventanas**, pendiente de aprobación. Toca `packages/elde_core`:
+   va en rama propia.
+
+### Sin medir, si hace falta tirar del hilo
+
+- **Por qué 119 personas no tienen identidad.** `origen_demografia` sale vacío.
+- **Si el desfase entre cámaras** explica que solo 47 de 292 se enlacen.
+- **Cuánto mejora aflojar el listón**, midiéndolo con el vídeo.
+
+### Cómo medir sin el servidor del usuario (probado el 23-sep)
+
+El pipeline REAL corre en el contenedor: `TiendasProcess(client_id=...)` y
+`proc.process_frame(frame, camera_id=...)`. En CPU va a ~0,65 s/frame. **Usa el
+`camera_id` real** (`win-iVMS-4200-i58bf7b`) o no se aplica el perfil. Y lee el
+informe de calidad del clasificador **DE LA CÁMARA**
+(`proc.camera_states[cam]['_demographics']`), no el de arriba: ese no trabaja.
+Haz `os.chdir()` al scratchpad para que nada escriba en el repo.
 
 ---
 
@@ -470,6 +662,14 @@ Antes de citar uno, **comprueba que el código sigue igual**. Los que llevan
   reconstruyas sin que te lo pidan.
 - **Nunca commitees** `server/models/`, `output/`, `logs/`, el `.env` ni el
   `venv`. Usa `git add <archivos>` explícitos, nunca `git add .`.
-- **Los avisos de `mivolo.onnx` y `par_gender.onnx` «no presente»** son de
-  modelos opcionales. MiVOLO v2 (PyTorch) sí carga y la rama corporal queda
-  activa; el aviso del `.onnx` es de otra ruta.
+- **`opencv-contrib-python` TIENE que ser la 4.12.0.88.** En la 5.x se cae
+  todo el stack facial en silencio (ver «Cómo montar el entorno»).
+- **Los avisos de `mivolo.onnx` y `par_gender.onnx` «no presente» son RUIDO.**
+  MiVOLO v2 carga por otra ruta (`estimador_edad_genero.py`) y la rama corporal
+  queda activa. **No generes esos modelos**: el código no los usaría.
+- **Antes de creerte una bandera de telemetría, contrástala.** El 23-sep
+  `rama_corporal_activa` decía `False` con 235 muestras corporales aceptadas.
+  Si un indicador y un contador se contradicen, uno de los dos está viejo.
+- **`server/README.md` NO está en la lista de lectura obligatoria y debería.**
+  Ahí está la tabla de modelos esenciales contra opcionales y el peso de cada
+  rama en la votación (facial 1.0, corporal 0.5).
