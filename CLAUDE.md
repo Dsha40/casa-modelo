@@ -1,12 +1,19 @@
 # CLAUDE.md — ELDE Tiendas (contexto de trabajo)
 
-Traspaso de las sesiones del 16-18 sep, 21-22 sep y 23-sep 2026. **Este
-archivo SÍ se commitea**: vive en la rama para que la siguiente sesión lo lea
-sin que el usuario tenga que pegarlo.
+Traspaso de las sesiones del 16-18 sep, 21-22 sep, 23-sep y **24-sep** 2026.
+**Este archivo SÍ se commitea**: vive en la rama para que la siguiente sesión
+lo lea sin que el usuario tenga que pegarlo.
 
-Rama de trabajo actual: **`fix/gender`** (publicada), que cuelga de
-`claude/pensive-galileo-aymjr3` → `fix/eliminar_vigilantes_amazonas` (no de
-`main`). Al cambiarte a ella heredas todo lo anterior.
+Rama de trabajo actual: **`feature/anaquel`** (publicada), que cuelga de
+`fix/gender` → `claude/pensive-galileo-aymjr3` →
+`fix/eliminar_vigilantes_amazonas` (no de `main`). Al cambiarte a ella heredas
+todo lo anterior.
+
+**Hay DOS sesiones de Claude trabajando en paralelo** (24-sep): esta, en el
+Linux del usuario junto al servidor, y otra en el **cliente** de Windows. No
+se ven entre ellas: lo único que comparten es lo que quede commiteado aquí.
+Si vienes de la del cliente, tu encargo está en «Encargo para la sesión del
+CLIENTE», al final.
 
 **El 23-sep se midió por primera vez sobre PRODUCCIÓN REAL** (14 h de log y la
 base del usuario), y eso corrigió conclusiones que venían de muestras cortas.
@@ -14,28 +21,59 @@ Donde este archivo dé una cifra, mira su fecha: las del 23-sep mandan.
 
 ---
 
-## EL MODO DE TRABAJO CAMBIÓ (21-sep) — léelo antes que nada
+## EL MODO DE TRABAJO CAMBIÓ OTRA VEZ (24-sep) — léelo antes que nada
 
-Las sesiones del 16-18 sep corrían en el Windows del usuario, sin acceso al
-servidor. **Ya no.** Ahora Claude corre en un **contenedor remoto con el
-repositorio clonado**, y eso cambia casi todo lo operativo:
+| | 16-18 sep | 21-23 sep | **24-sep (HOY)** |
+|---|---|---|---|
+| Dónde corre Claude | Windows del usuario | contenedor remoto, efímero | **DENTRO del contenedor del usuario** |
+| Acceso al servidor | no | no | **SÍ: log, base, capturas, modelos** |
+| GPU | no | no (CPU, 0,65 s/frame) | **SÍ: 2× RTX 3090 Ti + 1× 5060 Ti** |
+| Servidor + Claude a la vez | imposible | imposible | **posible** (sobra GPU) |
+| Validación en vivo | log pegado | log pegado | **se lee sola** |
 
-| | Antes (16-18 sep) | Ahora (21-22 sep) |
-|---|---|---|
-| Acceso al repo | solo Windows | contenedor propio, efímero |
-| Suite de pruebas | «aquí no corre» | **corre entera**: 767 pasan |
-| Cambios | el usuario los copiaba a mano | Claude **commitea y publica** |
-| El usuario | pegaba logs | hace `git pull` y pega logs |
+Verificado el 24-sep: `hostname` = `51b31f634ba9`, existe `/.dockerenv`, y el
+venv del proyecto (`.venv`, Python 3.12.13) trae `cv2 4.12.0`,
+`torch 2.8.0+cu128` y `cuda True`. **No hay cliente `docker` ni acceso al
+demonio**, así que Claude no puede crear contenedores: comparte el del
+usuario.
 
-**Lo que NO cambió:** el servidor de inferencia sigue corriendo en el Linux
-del usuario (`/home/D-arias365/proyectos/ELDE-TIENDAS`, contenedor
-`51b31f634ba9`), Claude **no tiene acceso a él**, y el usuario **no puede usar
-Claude y el servidor a la vez**. Toda validación en vivo llega como log pegado.
+**El riesgo cambió de sitio.** Antes el contenedor era desechable; ahora todo
+lo que Claude toca es el entorno REAL del usuario. Reglas de convivencia
+acordadas el 24-sep:
 
-### Cómo montar el entorno de pruebas en el contenedor
+1. **No instalar nada en `.venv`** sin pedirlo: ya tiene lo que hace falta.
+2. Los arneses van al **scratchpad**, nunca al repo.
+3. **No tocar `output/`, `logs/` ni `models/`**: ahí viven sus datos reales.
+   Para medir, exporta `ELDE_TIENDA_DB` al scratchpad y haz `os.chdir()` allí
+   — `CAPTURE_DIR` y la ruta de la base son RELATIVAS al directorio de
+   trabajo, así que el chdir las desvía solo.
+4. Sigue pidiendo permiso antes de cada commit y cada push.
 
-No viene nada instalado. Esto deja la suite **entera en verde** (el índice de
-PyTorch está bloqueado por el proxy; **torch hay que sacarlo de PyPI**):
+**Herramientas que NO existen en este contenedor** (comprobado a la mala):
+`ss` (usa `curl` contra `/health` para ver si el servidor escucha) y `docker`.
+
+### Arrancar el servidor desde aquí
+
+```bash
+cd /home/D-arias365/proyectos/ELDE-TIENDAS/server
+../.venv/bin/python iniciar_servidor_headless.py      # puerto 9000
+curl -s http://localhost:9000/health                  # comprobar
+```
+
+⚠️ Bloquea la terminal: lánzalo con `nohup ... &`. Y **la salida por `stdout`
+va AMORTIGUADA**: al capturarla con un pipe salen ráfagas de hasta 57 líneas
+con la misma marca de tiempo. Para medir ritmos **no uses tus propias marcas,
+usa el contador `Frame N` del servidor**, que es exacto.
+
+### Cómo montar el entorno de pruebas
+
+**Si corres en el contenedor del usuario (lo normal desde el 24-sep): NO HAY
+QUE MONTAR NADA.** Usa `.venv/bin/python`, que ya trae todo y además tiene
+GPU. Instalar cosas ahí sin permiso rompe su entorno.
+
+Lo de abajo es para un contenedor PROPIO (nube o efímero), donde no viene
+nada. Deja la suite **entera en verde** (el índice de PyTorch está bloqueado
+por el proxy; **torch hay que sacarlo de PyPI**):
 
 ```bash
 # La version de OpenCV NO es opcional: ver abajo.
@@ -54,6 +92,22 @@ La línea base vieja («767 passed, 4 failed, los 4 son del contenedor») **est�
 obsoleta**: 3 fallos eran por `reportlab` y 1 por los pesos de Git LFS. Con
 esas dos cosas instaladas **no hay ningún fallo aceptable**. Si ves uno, es
 tuyo.
+
+⚠️ **`torchreid` rompe ese `pip install` ENTERO** (medido el 23-sep): no
+compila con el `setuptools` de Debian (`AttributeError: install_layout`), y
+como pip aborta el lote **no se instala ni un solo paquete**, no solo
+torchreid. Hay que hacerlo en dos pasos:
+
+```bash
+pip install <todo lo de arriba MENOS torchreid>
+SETUPTOOLS_USE_DISTUTILS=stdlib pip install torchreid
+```
+
+Y las pruebas de `packages/elde_core` necesitan además `PySide6`, `cffi`,
+`cryptography` y las librerías de Qt (`apt-get install -y libegl1 libgl1
+libxkbcommon0 libdbus-1-3 libfontconfig1`). **Su suite tiene 71 fallos
+PREEXISTENTES** (tests que nombran a otros clientes): no son tuyos. Medido el
+23-sep guardando los cambios con `git stash` y corriéndola sin ellos.
 
 **Dos trampas que costaron horas el 23-sep:**
 
@@ -238,10 +292,11 @@ restáuralo y comprueba que pasa. Un test que pasa siempre no demuestra nada.
 
 | | |
 |---|---|
-| **Contenedor de Claude** | Repo clonado, efímero. Sin dependencias: instálalas (arriba). Lo que no se commitea, se pierde |
-| **Linux del usuario** | Contenedor Docker `51b31f634ba9`, repo en `/home/D-arias365/proyectos/ELDE-TIENDAS`, venv `.venv`. **Ahí corre el servidor. No tienes acceso** |
-| **Windows del usuario** | Cliente de escritorio + edición |
-| **Limitación** | El usuario **no puede usar Claude y el servidor a la vez** |
+| **Dónde corres (24-sep)** | **DENTRO** del contenedor `51b31f634ba9` del usuario, repo en `/home/D-arias365/proyectos/ELDE-TIENDAS`, venv `.venv` (Python 3.12.13, CUDA). **Ves el servidor, su log, su base y sus modelos** |
+| **GPUs** | 2× RTX 3090 Ti (24 GB) + 1× RTX 5060 Ti (16 GB). El servidor **usa solo la primera** (`_get_first_gpu`, `app.py:284`) |
+| **Windows del usuario** | Cliente de escritorio. **Otra sesión de Claude trabaja ahí**; no os veis |
+| **Limitación que SIGUE** | El usuario no puede usar el **cliente** y la sesión del cliente a la vez. Por eso el encargo de abajo pide escribir la telemetría a disco |
+| **Contenedor propio** | No se puede: no hay `docker` ni acceso al demonio. Para aislarse, el usuario cambia a la web |
 
 ### Dónde están los logs y los datos (verificado el 22-sep)
 
@@ -392,6 +447,105 @@ tener sentido y la recomendación de no hacerlo dejaría de ser cierta.
 el pendiente «validar el TTL con los 30 minutos reales».
 
 ---
+
+### Sesión 23-sep (tarde) — rama `feature/anaquel`
+
+**`288be55` — Pintar en el recuadro las muñecas que ve el modo Anaqueles.**
+
+Calibrar un área era adivinar: desde el cliente no había forma de ver DÓNDE
+cree el servidor que está la mano. Ahora `metadata['anaqueles']` lleva, por
+fotograma, cada muñeca con su profundidad respecto al área, y el recuadro las
+pinta (verde = la cuenta dentro, ámbar = no llega). Interruptor en el menú
+**Vista**, nace apagado. Va SIN throttle (el resto del bloque va a 2/10/30 s)
+y **caduca a los 0,7 s**: un punto viejo clavado miente más que un hueco.
+16 pruebas. No toca el contrato de entrada.
+
+### Lo medido sobre ANAQUELES con vídeo real (23-sep)
+
+Probado con una foto y un vídeo de 2,5 s de un pasillo de cereales:
+
+- **RF-DETR detecta a la persona con conf 0,96** y **ViTPose encuentra las dos
+  muñecas** (conf 0,67-0,91). Las piezas funcionan.
+- **Dónde dibujes el área lo decide TODO.** Con el área ceñida a los
+  productos, la compuerta **no abre**: solape 12.480 px² de los 24.044 que
+  pide. No cuenta ni visitas ni agarres. Bajándola por debajo de la balda sí
+  abre (32.112 px²). **Dibuja las áreas generosas.**
+- **El agarre exige ver la mano ENTRAR.** En el vídeo la mano ya estaba en el
+  estante: 25 fotogramas seguidos con la muñeca dentro, `fuera=0`,
+  `armado=False` → 0 agarres. Es correcto por diseño. Invertir el vídeo
+  tampoco cuenta.
+- La lógica de conteo pasa 5/5 casos sintéticos (dwell, quietud, cooldown,
+  dos personas a la vez).
+
+**TRAMPA: `pose_disponible: false` NO significa que falte la pose.** Es
+`self._modelo is not None` (`pose_motor.py:95`) y el modelo es PEREZOSO: vale
+`False` hasta que alguien entra en compuerta por primera vez. Comprobado
+forzando la carga: pasa a `True` y devuelve los 17 keypoints. **Y el panel del
+cliente enseña un aviso alarmante basándose en esa bandera**
+(`anaqueles_panel.py:249`). Es el mismo tipo de trampa que el error nº 6.
+
+**Los `descartes` no se ven por ningún lado.** El medidor acumula POR QUÉ no
+contó (`agarre_amplitud`, `visita_movimiento`…), pero el panel no los muestra
+(`anaqueles_panel.py:184` solo lee `suspendido`, `sin_personas_s` y
+`pose_disponible`) y la API no los expone. **Sin eso, ajustar umbrales es a
+ciegas.** Exponerlos es lo primero que habría que hacer en Anaqueles.
+
+**Para cambiar a modo `Anaqueles`** hay que **detener la conexión** primero:
+el desplegable del pie está deshabilitado mientras hay conexión
+(`custom_status_bar.py:109` y `:174`; se libera en `:215`). No es obvio y
+costó una hora.
+
+### Sesión 24-sep — RENDIMIENTO: dónde está el cuello (MEDIDO)
+
+**El «2-3 fps efectivos» que repiten los comentarios del código NUNCA estuvo
+medido.** El servidor no tiene telemetría de tiempos. Esto sí está medido.
+
+**Banco aislado** (GPU real, frame real de 1280×790 rescatado de
+`output/heatmap/`, que contiene la escena del pasillo):
+
+| Escena | Por frame | fps | Detección | Demografía |
+|---|---:|---:|---:|---:|
+| 1 persona | 38,4 ms | **26,0** | 32,4 ms (84 %) | 3,0 ms |
+| 4 personas | 60,0 ms | 16,7 | 34,2 ms | **27,2 ms** |
+
+- **La detección cuesta lo mismo haya 0 o 6 personas** (~32-36 ms). Es el
+  coste fijo y domina.
+- **La demografía escala con la gente**: ×10 de 1 a 4 personas.
+- **Las cámaras no encarecen el frame: REPARTEN los fps.**
+  1 cámara → 22,3 fps · 2 → 12,6 · **4 → 4,4 por cámara**. De ahí salía el
+  folclore de los 2-3 fps: el número era real, la explicación no.
+
+**En vivo, con el cliente conectado y UNA cámara** (modo Anaqueles, 1.129
+fotogramas en 176 s):
+
+```
+FPS REAL DEL SISTEMA:  6,4 fps   (ciclo de 156 ms)
+GPU 0: 36,8 % de uso medio, maximo 64 %, NUNCA >90 %
+GPU 1 y 2: 0 % — paradas
+```
+
+**EL CUELLO NO ES LA GPU NI EL MODELO. Es el ciclo secuencial
+cliente↔servidor.** El cliente manda un fotograma y **se queda parado** hasta
+recibir la respuesta (`can_send_next_frame`, `render_box.py:633` y `:1753`).
+Mientras el servidor calcula, el cliente espera; mientras el cliente captura,
+comprime y pinta, el servidor espera. **Nunca trabajan a la vez**, y por eso
+la GPU está al 37 %.
+
+De los 156 ms del ciclo, ~57 son cálculo y **~99 son espera**.
+
+**DESCARTADAS por la medición** (no las propongas): fp16, bajar la resolución
+del detector y repartir cámaras entre las 3 GPUs. Las tres aceleran una GPU
+que está al 37 % — no darían ni un fotograma más.
+
+**LA PALANCA QUE QUEDA: dos fotogramas en vuelo en el cliente.** Que mientras
+el servidor procesa el N, el cliente ya capture y comprima el N+1. Estimado
+(no medido): acercarse al doble de fps, GPU al 70-80 %. La cola del servidor
+ya está preparada — se queda solo con el fotograma más reciente por cámara
+(`ws_drenaje.py`), y **nunca ha descartado uno**: `descartados = 0` en todo el
+log.
+
+Un comentario que SÍ acertaba: `capture_worker.py:27` decía «a 1280 px ~130
+ms/frame». Medimos 116-156. Ese número era bueno.
 
 ## Lo que se aprendió midiendo
 
@@ -622,16 +776,22 @@ Antes de citar uno, **comprueba que el código sigue igual**. Los que llevan
 3. **La ruta de las capturas** (hallazgo 20). Pequeño y desbloquea el panel de
    Capturas, que hoy no sirve.
 4. **El doble conteo** (hallazgos 1 y 13). Ya medido: 53 personas, 20 %.
-5. **Decisiones suyas, sin prisa:**
+5. **Rendimiento (24-sep, medido):** probar **dos fotogramas en vuelo** en el
+   cliente. Es la única palanca viva; fp16, resolución y multi-GPU quedaron
+   descartadas por la medición. Línea base: **6,4 fps**. Lo hace la sesión del
+   cliente (ver su encargo).
+6. **Exponer los `descartes` de Anaqueles** en la API y el panel. Sin eso,
+   ajustar los umbrales del agarre es a ciegas.
+7. **Decisiones suyas, sin prisa:**
    - **La semántica del número.** Con TTL se cuentan **recorridos**, no
      personas del día. El dashboard sigue diciendo «visitantes únicos».
    - **El destino de la rama `fix/gender`:** ¿la integra, se abre un PR?
-6. **Cosas del montaje, no del código:** dos cámaras caídas, una intermitente,
+8. **Cosas del montaje, no del código:** dos cámaras caídas, una intermitente,
    el desfase de imagen y la calibración (el perfil que se aplica hoy se hizo
    en agosto mirando OTRA escena, el stand de charcutería).
-7. **Aplazados por el usuario** (no los empieces sin que lo pida): vídeo que no
+9. **Aplazados por el usuario** (no los empieces sin que lo pida): vídeo que no
    se congela si la IA falla (hallazgo 7), y qué contar entre cámaras.
-8. **Escáner de ventanas**, pendiente de aprobación. Toca `packages/elde_core`:
+10. **Escáner de ventanas**, pendiente de aprobación. Toca `packages/elde_core`:
    va en rama propia.
 
 ### Sin medir, si hace falta tirar del hilo
@@ -650,6 +810,79 @@ informe de calidad del clasificador **DE LA CÁMARA**
 Haz `os.chdir()` al scratchpad para que nada escriba en el repo.
 
 ---
+
+## Encargo para la sesión del CLIENTE (24-sep)
+
+Escrito por la sesión que corre en el Linux, junto al servidor. **No nos
+vemos**: esto es lo único que nos comunica.
+
+### Lo que ya está medido (no lo repitas)
+
+El cuello **no está en el servidor**. Está en el ciclo secuencial: el cliente
+manda un fotograma y espera parado la respuesta. Números arriba, en «Sesión
+24-sep — RENDIMIENTO». Resumen: ciclo de **156 ms**, de los que **~57 son
+cálculo y ~99 son espera**, con la GPU al **37 %**.
+
+### Lo que falta, y que SOLO tú puedes medir
+
+**En qué se van esos ~99 ms.** Desde el servidor no se ve. Por fotograma
+hacen falta cinco marcas de tiempo:
+
+| Marca | Dónde, aproximadamente |
+|---|---|
+| `t_captura` | el frame sale del `capture_worker` |
+| `t_jpeg` | tras `img.save(buf, "JPEG", 80)` (`render_box.py:585`) |
+| `t_envio` | tras `send_binary_frame` (`:632`) |
+| `t_respuesta` | al liberar `can_send_next_frame` (`:1753`) |
+| `t_pintado` | tras pintar el recuadro |
+
+Con eso sale el desglose: captura, compresión, ida+servidor+vuelta, pintado.
+
+### LA RESTRICCIÓN: no puedes tener el cliente y tu sesión a la vez
+
+El usuario **cierra el cliente para hablar contigo**, así que no vas a ver
+nada en vivo. **El cliente tiene que DEJAR LAS MEDICIONES ESCRITAS EN DISCO** y
+tú las lees después. Diseño propuesto:
+
+1. Un módulo propio (una funcionalidad, un fichero), p. ej.
+   `clients/tienda/src/core/telemetria_ciclo.py`.
+2. Escribe **una línea JSON por fotograma** (JSONL) con las cinco marcas y el
+   `camera_id`. Amortiguado, y con `flush` cada pocos segundos: si el usuario
+   cierra el cliente de golpe **no puede perderse el fichero**.
+3. Ruta FIJA y fácil de encontrar, fuera del repo: p. ej.
+   `%LOCALAPPDATA%\tienda_view\telemetria_ciclo.jsonl`. **Dile al usuario la
+   ruta exacta** para que sepa dónde está.
+4. Detrás de un **interruptor apagado por defecto** (menú Vista, como las
+   muñecas): es diagnóstico, no algo que deba correr siempre.
+5. Que **rote o se trunque**: a 6 fps son ~21.600 líneas por hora.
+
+Procedimiento con el usuario: enciende el interruptor → cierra la sesión
+contigo → usa el cliente unos minutos → vuelve → tú lees el JSONL y lo
+analizas. **Avísale de que el fichero solo se completa al cerrar el cliente.**
+
+### Y la palanca que hay que probar: DOS fotogramas en vuelo
+
+Hoy `can_send_next_frame` es un booleano: un fotograma en vuelo y a esperar.
+La propuesta es permitir **dos**, para que las dos mitades se solapen.
+
+- Dónde: `render_box.py:276` (estado), `:582` (la guarda), `:633` (tras
+  enviar) y `:1753` (al recibir).
+- **Riesgo bajo**: la cola del servidor ya se queda solo con el fotograma más
+  reciente por cámara, y nunca ha descartado ninguno (`descartados = 0`).
+- **Mantén la red de seguridad de los 10 s** (`:575`), que libera si la
+  respuesta se pierde. Con dos en vuelo hay que contar los pendientes, no un
+  booleano.
+- **Mídelo**: los 6,4 fps de hoy son la línea base. Si no sube, dilo — es una
+  hipótesis, no una certeza.
+
+### Dos cosas del cliente que ya sabemos y no hace falta re-descubrir
+
+- **El panel de Anaqueles dice «Persona (Desconocido)»** en vez de
+  Hombre/Mujer: `anaqueles_panel.py:55-56` traduce `male/female` y el servidor
+  manda `Hombre/Mujer`, así que `:363` cae al valor por defecto. Arreglo de
+  una línea. No afecta a los contadores.
+- **El panel avisa «modelo de pose no disponible» aunque la pose funcione**
+  (`:249`): lee la bandera perezosa `pose_disponible`. Ver arriba.
 
 ## Cosas que no debes olvidar
 
