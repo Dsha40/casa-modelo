@@ -247,6 +247,25 @@ class AlmacenTienda:
                         motivo            TEXT,
                         mtime             REAL NOT NULL DEFAULT 0
                     )''')
+                # Una fila por PERSONA CLASIFICADA, tenga identidad o no
+                # (24-sep-2026). `tienda_visitas` solo puede guardar a quien
+                # tiene `persistent_id`, y el género se decidía muchas veces
+                # sobre alguien sin identidad todavía: medido ese día, 3 de 3
+                # clasificados no llegaron a la base. Aquí se guardan todos, y
+                # `person_uuid` se rellena si la identidad llega DESPUÉS. La
+                # clave es la captura (`stem`), única por persona-track: sirve
+                # para completar la fila más tarde sin duplicarla.
+                con.execute('''
+                    CREATE TABLE IF NOT EXISTS tienda_clasificaciones (
+                        stem         TEXT PRIMARY KEY,
+                        ts           REAL NOT NULL,
+                        jornada      TEXT NOT NULL,
+                        camera_id    TEXT NOT NULL,
+                        genero       TEXT NOT NULL,
+                        edad         TEXT,
+                        person_uuid  TEXT,
+                        solo_cuerpo  INTEGER NOT NULL DEFAULT 0
+                    )''')
                 # Los índices son los del dashboard: siempre se pregunta por
                 # ventana de fechas, y casi siempre acotando a una cámara.
                 for sql in (
@@ -264,6 +283,8 @@ class AlmacenTienda:
                     'ON tienda_capturas(ts DESC)',
                     'CREATE INDEX IF NOT EXISTS idx_cap_jornada '
                     'ON tienda_capturas(jornada)',
+                    'CREATE INDEX IF NOT EXISTS idx_cla_jornada_cam '
+                    'ON tienda_clasificaciones(jornada, camera_id)',
                 ):
                     con.execute(sql)
             self._preparado = True
@@ -304,6 +325,38 @@ class AlmacenTienda:
             return                      # nada que consolidar
         self._encolar(('demografia', float(ts if ts is not None else time.time()),
                        str(camera_id), str(persistent_id), 0.0, g, e))
+
+    def anotar_clasificacion(self, camera_id: Any, stem: str,
+                             genero: Optional[str], edad: Optional[str],
+                             person_uuid: Optional[str] = None,
+                             solo_cuerpo: bool = False,
+                             ts: Optional[float] = None) -> None:
+        """Una persona quedó CLASIFICADA, con o sin identidad.
+
+        A diferencia de `anotar_demografia`, no exige `persistent_id`: es
+        justo lo que se perdía. Si `person_uuid` llega después, completarla
+        con `identificar_clasificacion`.
+        """
+        g = (genero or '').strip()
+        if not g or g.lower() == 'desconocido' or not stem:
+            return                      # sin género no es una clasificación
+        self._encolar(('clasificacion',
+                       float(ts if ts is not None else time.time()),
+                       str(camera_id), str(stem), 0.0, g,
+                       (edad or '').strip() or None,
+                       (person_uuid or '').strip() or None,
+                       1 if solo_cuerpo else 0))
+
+    def identificar_clasificacion(self, stem: str, person_uuid: str) -> None:
+        """La identidad de una clasificación llegó TARDE: se completa.
+
+        Solo rellena el hueco (`person_uuid IS NULL`): una identidad ya
+        escrita no se pisa, igual que la demografía nunca pisa lo sabido.
+        """
+        if not stem or not (person_uuid or '').strip():
+            return
+        self._encolar(('clasif_identidad', time.time(), '', str(stem), 0.0,
+                       None, None, str(person_uuid).strip()))
 
     def _encolar(self, op: Tuple) -> None:
         try:
@@ -349,8 +402,24 @@ class AlmacenTienda:
             if not self._preparado:
                 self._preparar()        # reintento: quizá el disco ya volvió
             with self._conectar() as con:
-                for tipo, ts, cam, pid, permanencia, genero, edad in lote:
+                for op in lote:
+                    # Las 7 primeras posiciones son las de siempre; las
+                    # clasificaciones (24-sep) añaden sus campos DETRÁS, así
+                    # que las operaciones viejas no cambian de forma.
+                    tipo, ts, cam, pid, permanencia, genero, edad = op[:7]
+                    extra = op[7:]
                     jornada = jornada_de(ts)
+                    if tipo == 'clasificacion':
+                        self._upsert_clasificacion(con, jornada, cam, pid, ts,
+                                                   genero, edad, extra[0],
+                                                   extra[1])
+                        continue
+                    if tipo == 'clasif_identidad':
+                        con.execute(
+                            'UPDATE tienda_clasificaciones SET person_uuid = ? '
+                            'WHERE stem = ? AND person_uuid IS NULL',
+                            (extra[0], pid))
+                        continue
                     if tipo == 'demografia':
                         self._upsert_demografia(con, jornada, cam, pid, ts,
                                                 genero, edad)
@@ -399,6 +468,24 @@ class AlmacenTienda:
             '  genero    = COALESCE(excluded.genero, genero), '
             '  edad      = COALESCE(excluded.edad, edad)',
             (jornada, cam, pid, ts, ts, genero, edad))
+
+    @staticmethod
+    def _upsert_clasificacion(con, jornada: str, cam: str, stem: str,
+                              ts: float, genero: str, edad: Optional[str],
+                              person_uuid: Optional[str],
+                              solo_cuerpo: int) -> None:
+        # Una segunda clasificación de la MISMA captura (el género se revisó)
+        # actualiza el género y la edad; la identidad solo rellena huecos.
+        con.execute(
+            'INSERT INTO tienda_clasificaciones '
+            '(stem, ts, jornada, camera_id, genero, edad, person_uuid, '
+            ' solo_cuerpo) VALUES (?,?,?,?,?,?,?,?) '
+            'ON CONFLICT(stem) DO UPDATE SET '
+            '  genero      = excluded.genero, '
+            '  edad        = COALESCE(excluded.edad, edad), '
+            '  person_uuid = COALESCE(person_uuid, excluded.person_uuid), '
+            '  solo_cuerpo = excluded.solo_cuerpo',
+            (stem, ts, jornada, cam, genero, edad, person_uuid, solo_cuerpo))
 
     # ── Lectura ─────────────────────────────────────────────────────────
     def contadores_de(self, camera_id: Any,
@@ -618,6 +705,66 @@ class AlmacenTienda:
                 rec['edad'][f['edad']] = rec['edad'].get(f['edad'], 0) + n
         return {'genero': genero, 'edad': edad, 'por_camara': por_camara}
 
+    def clasificaciones(self, desde: Optional[str] = None,
+                        hasta: Optional[str] = None,
+                        camera_id: Optional[Any] = None) -> Dict[str, Any]:
+        """Clasificados de la ventana, separados POR IDENTIDAD.
+
+        `con_identidad` son personas reconocidas (cuentan en las visitas);
+        `sin_identidad`, clasificadas sin que se las pudiera reconocer. Cada
+        fila es una persona-track: quien sale de cámara y vuelve puede contar
+        dos veces en `sin_identidad`, porque sin identidad no hay forma de
+        saber que es la misma. Por eso no se mezclan con las visitas.
+        """
+        desde = desde or jornada_de()
+        hasta = hasta or desde
+        cond = 'jornada BETWEEN ? AND ?'
+        args: List[Any] = [desde, hasta]
+        if camera_id is not None:
+            cond += ' AND camera_id = ?'
+            args.append(str(camera_id))
+        def cubo() -> Dict[str, Any]:
+            return {'total': 0, 'genero': {}, 'edad': {}}
+        salida = {'con_identidad': cubo(), 'sin_identidad': cubo(), 'total': 0}
+        try:
+            self.volcar(force=True)
+            with self._conectar() as con:
+                # Con identidad se cuentan PERSONAS (la misma, reconocida en
+                # dos capturas, es una); sin identidad, capturas: no hay forma
+                # de saber que dos son la misma persona.
+                filas = con.execute(
+                    'SELECT genero, edad, '
+                    '  COUNT(DISTINCT person_uuid) AS n_ident, '
+                    '  SUM(person_uuid IS NULL) AS n_sin '
+                    f'FROM tienda_clasificaciones WHERE {cond} '
+                    'GROUP BY genero, edad', args).fetchall()
+                total_ident = con.execute(
+                    'SELECT COUNT(DISTINCT person_uuid) '
+                    f'FROM tienda_clasificaciones WHERE {cond}',
+                    args).fetchone()[0] or 0
+        except Exception as exc:                            # noqa: BLE001
+            self.fallos += 1
+            logger.warning('tienda_almacen: clasificaciones fallidas: %s', exc)
+            return salida
+        for f in filas:
+            for clave, n in (('con_identidad', int(f['n_ident'] or 0)),
+                             ('sin_identidad', int(f['n_sin'] or 0))):
+                if not n:
+                    continue
+                c = salida[clave]
+                c['genero'][f['genero']] = c['genero'].get(f['genero'], 0) + n
+                if f['edad']:
+                    c['edad'][f['edad']] = c['edad'].get(f['edad'], 0) + n
+                if clave == 'sin_identidad':
+                    c['total'] += n
+        # El total con identidad sale de su propia consulta, no de sumar los
+        # cubos: alguien con dos géneros distintos en dos capturas aparece en
+        # los dos cubos, pero es UNA persona.
+        salida['con_identidad']['total'] = int(total_ident)
+        salida['total'] = (salida['con_identidad']['total']
+                           + salida['sin_identidad']['total'])
+        return salida
+
     def ultima_entrada(self, camera_id: Any,
                        jornada: Optional[str] = None) -> Optional[float]:
         """Cuándo entró la última persona por esa cámara. `None` si nadie.
@@ -834,6 +981,9 @@ class AlmacenTienda:
                                 (limite,)).rowcount or 0
                 n += con.execute('DELETE FROM tienda_eventos WHERE jornada < ?',
                                  (limite,)).rowcount or 0
+                n += con.execute(
+                    'DELETE FROM tienda_clasificaciones WHERE jornada < ?',
+                    (limite,)).rowcount or 0
             if n:
                 logger.info('tienda_almacen: purgadas %d filas anteriores a %s',
                             n, limite)

@@ -34,6 +34,7 @@ import cv2
 import numpy as np
 
 from . import tienda_almacen as _almacen_tienda
+from .tienda_clasificaciones import EsperaDemografia
 from .analytics.config import AnalyticsConfig
 
 logger = logging.getLogger(__name__)
@@ -420,6 +421,7 @@ class FotosMixin:
             BORRA esta foto (es la misma persona en otro track de BoT-SORT);
         (2) si es nueva, escribe genero/edad/identidad en el sidecar JSON para
             el dashboard. Barato: solo toca tracks aun no procesados."""
+        self._resolver_esperas_demografia()
         if not self._capture_meta or not hasattr(self, '_demographics'):
             return
         base = AnalyticsConfig.CAPTURE_DIR
@@ -434,21 +436,7 @@ class FotosMixin:
             if not demo:
                 continue
             g = demo.get('gender')
-            puid = demo.get('person_uuid') or ''
-            # La demografia no siempre adjunta el uuid: preguntar tambien al
-            # reidentificador y al track vivo. Sin esto, un duplicado sin
-            # uuid en cache quedaba en disco PARA SIEMPRE.
-            if not puid and getattr(self, '_reidentifier', None) is not None:
-                try:
-                    puid = self._reidentifier.get_persistent_id(tid) or ''
-                except Exception:
-                    puid = ''
-            if not puid:
-                t = self.active_tracks.get(tid)
-                if t is not None and t.get('persistent_confirmed'):
-                    p = str(t.get('persistent_id') or '')
-                    if p and not p.startswith('prov:'):
-                        puid = p
+            puid = self._identidad_de_track(tid, demo)
             # Esperar a que haya algo firme (genero o identidad Re-ID).
             if g in (None, 'Desconocido') and not puid:
                 continue
@@ -506,6 +494,17 @@ class FotosMixin:
                         pass
                 with open(jp, "w", encoding="utf-8") as _f:
                     _json.dump(meta, _f, ensure_ascii=False)
+                # La ficha se cierra con lo PRIMERO que llegue (género o
+                # identidad) y ya no se vuelve a mirar: sin esto, lo que
+                # llegaba después se perdía (medido el 24-sep, ver
+                # tienda_clasificaciones.py). Se deja esperando lo que falte.
+                _cam = getattr(self, '_camera_id_actual', '') or ''
+                if g not in (None, 'Desconocido') and not puid:
+                    self._espera_demografia().esperar_identidad(
+                        tid, stem, _cam, g, demo.get('age_range'))
+                elif puid and g in (None, 'Desconocido'):
+                    self._espera_demografia().esperar_genero(
+                        tid, stem, _cam, puid)
                 self._captured_demo_done.add(tid)
                 # RE-anotar la copia del cliente con la demografia final
                 # (sobreescribe el mismo archivo -> sin duplicados).
@@ -518,6 +517,120 @@ class FotosMixin:
         if len(self._capture_meta) > 20000:  # acotar memoria
             self._capture_meta = dict(
                 list(self._capture_meta.items())[-10000:])
+
+    # ── Fichas cerradas a medias (24-sep-2026) ─────────────────────────
+    def _espera_demografia(self) -> EsperaDemografia:
+        # Perezosa y en el propio procesador: así no hay que tocar el
+        # __init__ de la clase base, que comparten cuatro modos.
+        espera = getattr(self, '_espera_demo', None)
+        if espera is None:
+            espera = self._espera_demo = EsperaDemografia()
+        return espera
+
+    def _identidad_de_track(self, tid, demo: Optional[dict] = None) -> str:
+        """La identidad firme de un track, o `''`.
+
+        La demografía no siempre adjunta el uuid: se pregunta también al
+        reidentificador y al track vivo. Sin esto, un duplicado sin uuid en
+        caché quedaba en disco PARA SIEMPRE. Los `prov:` no cuentan: son
+        provisionales y no identifican a nadie.
+        """
+        puid = str((demo or {}).get('person_uuid') or '')
+        if not puid and getattr(self, '_reidentifier', None) is not None:
+            try:
+                puid = self._reidentifier.get_persistent_id(tid) or ''
+            except Exception:
+                puid = ''
+        if not puid:
+            t = (getattr(self, 'active_tracks', None) or {}).get(tid)
+            if t is not None and t.get('persistent_confirmed'):
+                p = str(t.get('persistent_id') or '')
+                if p and not p.startswith('prov:'):
+                    puid = p
+        return puid
+
+    def _demografia_de_track(self, tid) -> Optional[dict]:
+        try:
+            return self._demographics.get_cached(tid)
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def _completar_sidecar(self, stem: str, cambios: dict,
+                           quitar: tuple = ()) -> Optional[dict]:
+        """Añade `cambios` a la ficha en disco. `None` si ya no existe."""
+        jp = os.path.join(AnalyticsConfig.CAPTURE_DIR, "persons",
+                          f"{stem}.json")
+        if not os.path.isfile(jp):
+            return None
+        try:
+            meta = json.loads(open(jp, encoding='utf-8').read())
+        except Exception:                                   # noqa: BLE001
+            return None
+        meta.update(cambios)
+        for clave in quitar:
+            meta.pop(clave, None)
+        with open(jp, "w", encoding="utf-8") as fichero:
+            json.dump(meta, fichero, ensure_ascii=False)
+        return meta
+
+    def _resolver_esperas_demografia(self) -> None:
+        """Completa las fichas a las que les llegó lo que les faltaba.
+
+        Nunca lanza: corre dentro del bucle de inferencia.
+        """
+        espera = getattr(self, '_espera_demo', None)
+        if not espera or not hasattr(self, '_demographics'):
+            return
+        cam = getattr(self, '_camera_id_actual', '') or ''
+        try:
+            identidades, generos = espera.revisar(
+                cam, self._identidad_de_track, self._demografia_de_track)
+        except Exception:                                   # noqa: BLE001
+            return
+        almacen = _almacen_tienda.get_almacen()
+
+        # Tenían género y acaban de recibir identidad: ahora sí puede ir a
+        # la fila de la visita, y la clasificación deja de ser anónima.
+        for _tid, stem, puid, genero, edad in identidades:
+            try:
+                if self._ficha_personal_tienda(puid) is not None:
+                    # Resultó ser personal enrolado: no es un visitante, así
+                    # que no se le escribe demografía. Su clasificación queda
+                    # como «sin identidad»; es un caso raro y se prefiere eso
+                    # a borrar a ciegas.
+                    continue
+                almacen.anotar_demografia(cam, puid, genero, edad)
+                almacen.identificar_clasificacion(stem, puid)
+                self._completar_sidecar(stem, {'person_uuid': puid})
+                self._captured_persons.setdefault(puid, stem)
+            except Exception:                               # noqa: BLE001
+                pass
+
+        # Tenían identidad y acaban de recibir género: la ficha se había
+        # cerrado con «muestras_insuficientes» y nunca se avisó. Se completa
+        # y se emite el aviso de visitante que no salió en su momento.
+        for _tid, stem, puid, demo in generos:
+            try:
+                cambios = {
+                    'gender': demo.get('gender'),
+                    'age_range': demo.get('age_range', 'Desconocido'),
+                    'person_uuid': puid,
+                    'solo_cuerpo': (
+                        demo.get('age_source') == 'body'
+                        or int(demo.get('n_face_samples', 0) or 0) == 0),
+                }
+                conf = demo.get('confidence')
+                if conf is not None:
+                    cambios['conf_genero'] = round(float(conf), 3)
+                meta = self._completar_sidecar(
+                    stem, cambios, quitar=('motivo_sin_demografia',))
+                if meta is None:
+                    continue
+                meta['demo_final'] = True
+                self._write_client_capture(stem, meta)
+                self._emitir_visitante(stem, meta)
+            except Exception:                               # noqa: BLE001
+                pass
 
     def _emitir_visitante(self, stem: str, meta: dict) -> None:
         """Encola el evento «visitante identificado» de este pipeline.
@@ -555,6 +668,14 @@ class FotosMixin:
                 _almacen_tienda.get_almacen().anotar_demografia(
                     getattr(self, '_camera_id_actual', '') or '',
                     _pid_demo, genero, edad)
+            # Y SIEMPRE, tenga identidad o no (24-sep-2026): `anotar_demografia`
+            # solo puede escribir a quien tiene identidad, y ese día 3 de 3
+            # clasificados se quedaron fuera. Esta tabla los guarda a todos
+            # sin tocar `tienda_visitas` ni el conteo de personas únicas.
+            _almacen_tienda.get_almacen().anotar_clasificacion(
+                getattr(self, '_camera_id_actual', '') or '', stem,
+                genero, edad, person_uuid=_pid_demo,
+                solo_cuerpo=bool(meta.get('solo_cuerpo')))
 
             visitas = meta.get('visitas')
             recurrente = isinstance(visitas, int) and visitas > 1

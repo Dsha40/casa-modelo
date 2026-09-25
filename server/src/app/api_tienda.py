@@ -317,6 +317,30 @@ def demografia(desde: Optional[str] = Query(None, pattern=_FECHA),
     }
 
 
+@router.get('/clasificaciones')
+def clasificaciones(desde: Optional[str] = Query(None, pattern=_FECHA),
+                    hasta: Optional[str] = Query(None, pattern=_FECHA),
+                    camara: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Clasificados de la ventana, separados por si se les reconoció o no.
+
+    `/demografia` solo ve a quien tiene identidad, porque sale de las
+    visitas. Aquí están TODOS los clasificados (24-sep-2026): ese día, 3 de 3
+    no tenían identidad y `/demografia` no los veía. `con_identidad` cuenta
+    personas; `sin_identidad` cuenta capturas, porque sin identidad no hay
+    forma de saber que dos capturas son la misma persona.
+    """
+    v = _ventana(desde, hasta)
+    cam = _camara(camara)
+    datos = _almacen.get_almacen().clasificaciones(v['desde'], v['hasta'],
+                                                   camera_id=cam)
+    return {
+        'ventana': {'desde': v['desde'], 'hasta': v['hasta'],
+                    'dias': v['dias']},
+        'camara': cam,
+        **datos,
+    }
+
+
 @router.get('/capturas')
 def capturas(desde: Optional[str] = Query(None, pattern=_FECHA),
              hasta: Optional[str] = Query(None, pattern=_FECHA),
