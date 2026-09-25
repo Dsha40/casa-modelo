@@ -42,11 +42,13 @@ APP = RAIZ / 'server' / 'src' / 'app' / 'app.py'
 
 #: Los argumentos que se añadieron AL FINAL y que no se pueden mover: los dos
 #: umbrales de permanencia (19-ago-2026), el rótulo del utensilio con el que
-#: se dibujó el umbral y las tres piezas de las PUERTAS —N umbrales con
-#: nombre, uno por sitio— (7-sep-2026).
+#: se dibujó el umbral, las tres piezas de las PUERTAS —N umbrales con
+#: nombre, uno por sitio— (7-sep-2026) y los PRODUCTOS dibujados dentro de
+#: las áreas del anaquel (25-sep-2026).
 ULTIMOS = ('min_permanencia_personas', 'min_permanencia_vehiculos',
            'linea_cruce_estilo',
-           'puertas_lineas', 'puertas_nombres', 'puertas_activate')
+           'puertas_lineas', 'puertas_nombres', 'puertas_activate',
+           'anaqueles_productos')
 
 #: Dos puertas como las manda el recuadro: píxeles del frame, 2 puntos por
 #: umbral, la POSICIÓN en la lista es la identidad de cada puerta.
@@ -204,6 +206,20 @@ def test_las_dos_ramas_cuelgan_LAS_PUERTAS_en_el_procesador():
             == len(_cuelgues(arbol, '_puertas_activate'))), (
         'las tres piezas de las puertas se cuelgan en distinto número de '
         'ramas: alguna rama recibe media configuración')
+
+
+def test_las_dos_ramas_cuelgan_LOS_PRODUCTOS_del_anaquel():
+    """Los productos (25-sep-2026) viajan con sus áreas: en cada rama donde
+    se cuelgan las áreas tienen que colgarse ellos. Si faltaran en una, esa
+    mitad de las cámaras contaría por área sin repartir entre productos, y
+    el síntoma sería un producto que nunca suma, no un error."""
+    arbol = _arbol()
+    zonas = len(_cuelgues(arbol, '_anaqueles_zonas'))
+    productos = len(_cuelgues(arbol, '_anaqueles_productos'))
+    assert zonas >= 2, f'solo {zonas} rama(s) cuelgan las áreas'
+    assert productos == zonas, (
+        f'las áreas se cuelgan en {zonas} ramas y los productos en '
+        f'{productos}: alguna rama recibe las áreas sin sus productos')
 
 
 def test_las_puertas_se_leen_del_payload_tal_como_las_manda_el_recuadro():

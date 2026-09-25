@@ -145,8 +145,19 @@ def resumen(camera_id: str,
             # /heatmap/{idx} sigue existiendo para consultas sueltas.
             'grid': grid,
             'grid_dim': datos.get('grid_dim'),
+            # Productos dibujados dentro del área (25-sep-2026). Lista vacía
+            # en las áreas sin productos y en los días anteriores.
+            'productos': _productos_de(a),
+            'agarres_sin_producto': int(a.get('agarres_sin_producto') or 0),
         })
     ranking = sorted(areas, key=lambda x: (-x['agarres'], -x['visitas']))
+    # Mismo motivo que `ranking`: que el dashboard no reimplemente el
+    # criterio. Entre áreas, porque «el producto más agarrado del pasillo»
+    # es la pregunta de marketing, no «el más agarrado de la balda 2».
+    ranking_productos = sorted(
+        ({'area_idx': a['idx'], 'area': a['nombre'], **p}
+         for a in areas for p in a['productos']),
+        key=lambda x: (-x['agarres'], x['area_idx'], x['idx']))
     return {
         'camera_id': camera_id,
         'fecha': datos.get('fecha'),
@@ -154,9 +165,25 @@ def resumen(camera_id: str,
         'ranking': [{'idx': a['idx'], 'nombre': a['nombre'],
                      'agarres': a['agarres'], 'visitas': a['visitas']}
                     for a in ranking],
+        'ranking_productos': ranking_productos,
         'total_visitas': sum(a['visitas'] for a in areas),
         'total_agarres': sum(a['agarres'] for a in areas),
     }
+
+
+def _productos_de(area: Dict[str, Any]) -> list:
+    """Los productos de un área del JSON diario, en orden de posición."""
+    salida = []
+    for clave, p in (area.get('productos') or {}).items():
+        try:
+            idx = int(clave)
+        except (TypeError, ValueError):
+            continue                       # clave ilegible: no se inventa
+        salida.append({'idx': idx,
+                       'nombre': (p or {}).get('nombre')
+                       or f'Producto {idx + 1}',
+                       'agarres': int((p or {}).get('agarres') or 0)})
+    return sorted(salida, key=lambda p: p['idx'])
 
 
 @router.get('/{camera_id}/heatmap/{area_idx}')

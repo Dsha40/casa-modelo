@@ -421,6 +421,14 @@ class CapturaDVRMixin:
                      else f"Área {i + 1}")
                     for i in range(len(zonas))],
             })
+            # Productos dentro de esas áreas (25-sep-2026). Por ESTA ruta
+            # también: las cámaras de iVMS se capturan por ventana y son las
+            # que miden de verdad. Con `getattr`, porque la etiqueta de otro
+            # cliente puede no tenerlos.
+            productos = getattr(etiqueta, 'get_productos_coordinates', None)
+            if productos is not None:
+                salida["anaqueles_productos"] = productos(self.image_w,
+                                                          self.image_h)
         # Umbral de cruce (puerta direccional / línea, 7-sep-2026). Es el
         # MISMO hueco que ya se pagó dos veces: los dos constructores de
         # payload —este y el del `render_box` del cliente— tienen que mandar

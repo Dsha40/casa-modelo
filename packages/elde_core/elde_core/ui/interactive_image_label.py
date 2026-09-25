@@ -4,6 +4,7 @@ from PySide6.QtGui import QPixmap, QMouseEvent, QPainter, QBrush, QPen, QColor
 
 from .flecha_direccion import INDICE_MEDIO, FlechaDireccion
 from .linea_cruce import LineaCruce
+from .productos_anaquel import ProductosAnaquel
 from .puerta_direccional import PuertaDireccional
 
 
@@ -38,6 +39,10 @@ class Interactive_imageLabel(QLabel):
     # 0..1000 + activo. Senal PROPIA por la misma razon que la flecha:
     # `point_change` tiene seis argumentos fijos y la usan varios clientes.
     anaqueles_change = Signal(list, bool)
+    # Productos DENTRO de las áreas de anaquel (25-sep-2026): la lista de
+    # `ProductosAnaquel.a_lista()`. Señal PROPIA por la misma razón que las
+    # áreas. No lleva interruptor: se ven y viajan con el de las áreas.
+    productos_change = Signal(list)
     # Zona del PERSONAL (modo comedor Hummus): poligono en espacio 0..1000 +
     # activo. Senal PROPIA, por la MISMA razon que la flecha, la linea y los
     # anaqueles: `point_change` tiene seis argumentos y la usan los cuatro
@@ -151,6 +156,13 @@ class Interactive_imageLabel(QLabel):
         self._anq_area = -1          # area cuyo vertice se arrastra
         self._anq_vert = -1          # indice del vertice arrastrado
 
+        # Productos DENTRO de las áreas (25-sep-2026). Su lógica vive en
+        # `productos_anaquel.py`; aquí solo el ratón y el pintado. Se ven y
+        # se editan SOLO con las áreas encendidas: un producto sin su balda
+        # no significa nada, y el servidor tampoco lo recibe.
+        self.productos = ProductosAnaquel(kwargs.get('anaqueles_productos'))
+        self._prod_arrastre = None   # (producto, esquina) agarrada
+
         # Qué conjunto de puntos edita el mouse:
         # 'roi' | 'order' | 'delivery' | 'personal'
         self.edit_target = 'roi'
@@ -245,6 +257,7 @@ class Interactive_imageLabel(QLabel):
         else:
             self.anaqueles_active = bool(state)
         self._anq_area = self._anq_vert = -1
+        self._prod_arrastre = None
         self.update()
 
     def agregar_anaquel(self):
@@ -272,6 +285,66 @@ class Interactive_imageLabel(QLabel):
         self._anq_area = self._anq_vert = -1
         self.update()
         self._emitir_anaqueles()
+        # Sus productos se van con ella: el índice que tenía el área es
+        # justo el nuevo largo de la lista.
+        self._prod_arrastre = None
+        if self.productos.quitar_de_anaquel(len(self.anaqueles)):
+            self._emitir_productos()
+
+    # ── Productos dentro de las áreas (25-sep-2026) ──────────────────────
+    def agregar_producto(self, anaquel: int, nombre: str = '') -> bool:
+        """Un producto nuevo DENTRO del área `anaquel`, con su nombre.
+        False si esa área no existe."""
+        if not 0 <= int(anaquel) < len(self.anaqueles):
+            return False
+        area = self.qpoints_to_list(self.anaqueles[int(anaquel)])
+        self.productos.agregar(int(anaquel), area, nombre)
+        self.anaqueles_active = True
+        self.update()
+        self._emitir_productos()
+        return True
+
+    def quitar_producto(self, anaquel: int) -> bool:
+        """Quita el ÚLTIMO producto del área (la identidad es la posición)."""
+        self._prod_arrastre = None
+        if not self.productos.quitar_ultimo(int(anaquel)):
+            return False
+        self.update()
+        self._emitir_productos()
+        return True
+
+    def renombrar_producto(self, indice: int, nombre: str) -> bool:
+        if not self.productos.renombrar(int(indice), nombre):
+            return False
+        self.update()
+        self._emitir_productos()
+        return True
+
+    def set_productos(self, data) -> None:
+        """Repone lo guardado. NO emite, igual que `set_anaqueles`."""
+        self.productos.poner(data)
+        self._prod_arrastre = None
+        self.update()
+
+    def get_productos_coordinates(self, image_width: int, image_height: int):
+        """Productos en píxeles del frame. VACÍA con las áreas apagadas,
+        igual que `get_anaqueles_coordinates`: sin áreas no hay productos."""
+        if not self.anaqueles_active:
+            return []
+        return self.productos.coordenadas_pixel(
+            image_width, image_height, len(self.anaqueles))
+
+    def _emitir_productos(self):
+        self.productos_change.emit(self.productos.a_lista())
+
+    def _escalar_xy(self, x, y) -> QPoint:
+        return self.get_scaled_point(QPoint(int(x), int(y)))
+
+    def _prod_vertice_en(self, pos):
+        """`(producto, esquina)` bajo `pos`, o `None`."""
+        if not self.anaqueles_active:
+            return None
+        return self.productos.vertice_en(pos, self._escalar_xy)
 
     def set_anaqueles(self, data, activa: bool = None):
         self.anaqueles = [self.list_to_qpoints(a) for a in (data or [])]
@@ -536,6 +609,10 @@ class Interactive_imageLabel(QLabel):
                 painter.drawText(origen.x() + 14, origen.y() - 9, etiqueta)
                 painter.setPen(QPen(_NARANJA, 2))
                 painter.drawText(origen.x() + 13, origen.y() - 10, etiqueta)
+            # Los productos ENCIMA de sus áreas: están dentro de ellas y
+            # son lo que el operador ajusta con más detalle.
+            self.productos.pintar(painter, self._escalar_xy,
+                                  activo=self._prod_arrastre)
 
         # Los utensilios de direccion, los ULTIMOS: van encima de las zonas
         # para poder cogerlos aunque caigan sobre un vertice del ROI. El
@@ -593,6 +670,8 @@ class Interactive_imageLabel(QLabel):
             return False
         if self.gadget_direccion_en(pos):
             return True
+        if self._prod_vertice_en(pos) is not None:
+            return True
         if self._anq_vertice_en(pos) is not None:
             return True
         for pts, activo in ((self.points, self.show_points),
@@ -612,7 +691,7 @@ class Interactive_imageLabel(QLabel):
     def arrastrando_punto(self) -> bool:
         """Hay un arrastre de punto en curso."""
         return (self.active_point_index != -1 or self.flecha_index != -1
-                or self._anq_vert != -1)
+                or self._anq_vert != -1 or self._prod_arrastre is not None)
 
     def mousePressEvent(self, event: QMouseEvent):
         if not self._interactive():
@@ -641,6 +720,13 @@ class Interactive_imageLabel(QLabel):
             vertice = self._vertice_en(event.pos())
             if vertice is not None:
                 self.edit_target, self.active_point_index = vertice
+                self.update()
+                return
+            # Las esquinas de producto ANTES que las de área: se pintan
+            # encima, y nacen dentro de ella, así que es lo que se ve.
+            prod = self._prod_vertice_en(event.pos())
+            if prod is not None:
+                self._prod_arrastre = prod
                 self.update()
                 return
             anq = self._anq_vertice_en(event.pos())
@@ -681,6 +767,14 @@ class Interactive_imageLabel(QLabel):
                     max(0, min(perc.x() + off.x(), 1000)),
                     max(0, min(perc.y() + off.y(), 1000)))
                 gadget.mover(self.flecha_index, destino)
+            self.update()
+            return super().mouseMoveEvent(event)
+        if self._prod_arrastre is not None and event.buttons() & Qt.LeftButton:
+            new_pos = event.pos()
+            new_pos.setX(max(0, min(new_pos.x(), self.width())))
+            new_pos.setY(max(0, min(new_pos.y(), self.height())))
+            perc = self.get_percentage_point(new_pos)
+            self.productos.mover(*self._prod_arrastre, perc.x(), perc.y())
             self.update()
             return super().mouseMoveEvent(event)
         if self._anq_vert != -1 and event.buttons() & Qt.LeftButton:
@@ -748,6 +842,11 @@ class Interactive_imageLabel(QLabel):
             self.update()
             if gadget is not None:
                 self._emitir_gadget(gadget)
+            return super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton and self._prod_arrastre is not None:
+            self._prod_arrastre = None
+            self.update()
+            self._emitir_productos()
             return super().mouseReleaseEvent(event)
         if event.button() == Qt.LeftButton and self._anq_vert != -1:
             self._anq_area = self._anq_vert = -1

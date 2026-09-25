@@ -90,7 +90,8 @@ class RegistroAnaqueles:
         self._ruta = self._carpeta / f'{_hoy()}.json'
         self._fecha = _hoy()
         #: idx (str) -> {'nombre', 'visitas', 'agarres', 'por_genero',
-        #: 'por_edad', '_grid' (np.ndarray)}
+        #: 'por_edad', '_grid' (np.ndarray), 'productos' (posición (str) ->
+        #: {'nombre', 'agarres'}), 'agarres_sin_producto'}
         self.areas: Dict[str, Dict[str, Any]] = {}
         self._sucio = False
         self._ultimo_volcado = 0.0
@@ -114,6 +115,8 @@ class RegistroAnaqueles:
                 'por_genero': {},
                 'por_edad': {},
                 '_grid': np.zeros(self.grid_dim, dtype=np.float32),
+                'productos': {},
+                'agarres_sin_producto': 0,
             }
             self.areas[clave] = a
             self._sucio = True
@@ -128,6 +131,51 @@ class RegistroAnaqueles:
         a[campo] = int(a.get(campo) or 0) + 1
         self._sucio = True
         return a[campo]
+
+    # ── Productos dentro del área (25-sep-2026) ─────────────────────────
+    def producto(self, idx: int, posicion: int,
+                 nombre: str = '') -> Dict[str, Any]:
+        """El registro del producto `posicion` del área `idx`; lo crea.
+
+        Mismo trato que `area()`: la identidad es la POSICIÓN y el nombre se
+        refresca, así que corregir una errata a media jornada conserva lo
+        contado. Se crea al DIBUJARLO, no al primer agarre, para que la API
+        distinga «dibujado y nadie lo tocó» de «no está dibujado».
+        """
+        a = self.area(idx)
+        clave = str(int(posicion))
+        p = a['productos'].get(clave)
+        if p is None:
+            p = {'nombre': nombre or f'Producto {int(posicion) + 1}',
+                 'agarres': 0}
+            a['productos'][clave] = p
+            self._sucio = True
+        elif nombre and p.get('nombre') != nombre:
+            p['nombre'] = nombre
+            self._sucio = True
+        return p
+
+    def sumar_producto(self, idx: int, posicion: int,
+                       nombre: str = '') -> int:
+        """Un agarre más para ese producto. Devuelve su total."""
+        p = self.producto(idx, posicion, nombre)
+        p['agarres'] = int(p.get('agarres') or 0) + 1
+        self._sucio = True
+        return p['agarres']
+
+    def sumar_sin_producto(self, idx: int) -> int:
+        """Un agarre del área que no cayó en ningún producto dibujado.
+
+        Es la cifra que dice si los productos están BIEN dibujados: si crece
+        a la par que los del área, las manos entran por donde no hay ningún
+        producto marcado. Solo se cuenta en áreas que tienen productos; en
+        las demás sería simplemente el total del área repetido.
+        """
+        a = self.area(idx)
+        a['agarres_sin_producto'] = int(a.get('agarres_sin_producto')
+                                        or 0) + 1
+        self._sucio = True
+        return a['agarres_sin_producto']
 
     def sumar_segmento(self, idx: int, genero: Optional[str],
                        rango_edad: Optional[str]) -> None:
@@ -251,6 +299,12 @@ class RegistroAnaqueles:
                         'por_edad': dict(a.get('por_edad') or {}),
                         'grid': [[round(float(v), 3) for v in fila]
                                  for fila in a['_grid']],
+                        'productos': {
+                            k: {'nombre': p.get('nombre'),
+                                'agarres': int(p.get('agarres') or 0)}
+                            for k, p in (a.get('productos') or {}).items()},
+                        'agarres_sin_producto': int(
+                            a.get('agarres_sin_producto') or 0),
                     }
                     for clave, a in self.areas.items()
                 },
@@ -294,6 +348,17 @@ class RegistroAnaqueles:
                     'por_genero': dict(a.get('por_genero') or {}),
                     'por_edad': dict(a.get('por_edad') or {}),
                     '_grid': grid,
+                    # Los JSON anteriores al 25-sep no traen productos: se
+                    # reanudan vacíos, sin inventar nada. El nombre NO se
+                    # deriva de la clave aquí: un `int()` que fallara lo
+                    # atraparía el `except` de abajo y se perdería la
+                    # reanudación del día ENTERO por un producto.
+                    'productos': {
+                        str(k): {'nombre': p.get('nombre') or '',
+                                 'agarres': int(p.get('agarres') or 0)}
+                        for k, p in (a.get('productos') or {}).items()},
+                    'agarres_sin_producto': int(
+                        a.get('agarres_sin_producto') or 0),
                 }
             if self.areas:
                 logger.info(

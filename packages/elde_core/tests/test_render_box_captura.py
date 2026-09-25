@@ -270,3 +270,42 @@ def test_el_payload_del_mixin_valida_contra_el_contrato():
     modelo = FrameInference(**data)   # el payload TAL CUAL sale al socket
     assert modelo.personal_zone_coordinates == [[50, 10], [60, 10], [60, 20], [50, 20]]
     assert modelo.order_zone_coordinates == [[10, 10], [20, 10], [20, 20], [10, 20]]
+
+
+# ── Productos dentro de las áreas de anaquel (25-sep-2026) ───────────────
+class EtiquetaConAnaqueles(EtiquetaConZonas):
+    """La etiqueta del núcleo con un área de anaquel y un producto dentro."""
+
+    def get_anaqueles_coordinates(self, w, h):
+        return [[[0, 0], [100, 0], [100, 50], [0, 50]]]
+
+    def get_productos_coordinates(self, w, h):
+        return [{'anaquel': 0, 'nombre': 'Colcafé',
+                 'poligono': [[0, 0], [50, 0], [50, 50], [0, 50]]}]
+
+
+class EtiquetaAnaquelesSinProductos(EtiquetaConZonas):
+    """Una etiqueta anterior a los productos: solo áreas."""
+
+    def get_anaqueles_coordinates(self, w, h):
+        return [[[0, 0], [100, 0], [100, 50], [0, 50]]]
+
+
+def test_los_productos_viajan_por_la_ruta_de_ventana():
+    """Las cámaras de iVMS se capturan por VENTANA: si los productos solo
+    viajaran por la ruta del DVR (`render_box.py`), las cámaras que miden de
+    verdad no repartirían un solo agarre, y sin error ninguno."""
+    from elde_core.contracts.eventos import FrameInference
+
+    data, _ = _enviado(EtiquetaConAnaqueles())
+    assert data['anaqueles_productos'] == [
+        {'anaquel': 0, 'nombre': 'Colcafé',
+         'poligono': [[0, 0], [50, 0], [50, 50], [0, 50]]}]
+    modelo = FrameInference(**data)
+    assert modelo.anaqueles_productos[0].nombre == 'Colcafé'
+
+
+def test_una_etiqueta_sin_productos_sigue_enviando():
+    data, _ = _enviado(EtiquetaAnaquelesSinProductos())
+    assert 'anaqueles_zonas' in data
+    assert 'anaqueles_productos' not in data

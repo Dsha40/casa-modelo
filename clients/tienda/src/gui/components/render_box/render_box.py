@@ -178,6 +178,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                  anaqueles_numeros=None,
                  asignar_numero_anaquel=None,
                  liberar_numero_anaquel=None,
+                 # Productos dibujados DENTRO de las areas (25-sep-2026):
+                 # `ProductosAnaquel.a_lista()` tal como se guardo.
+                 anaqueles_productos=None,
                  vlm_enabled_boolean=False,
                  heatmap_boolean=False,
                  trace_boolean=True,
@@ -254,6 +257,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         # atributo es el que leen LAS DOS rutas de payload.
         self.anaqueles_nombres       = [f"Anaquel {n}"
                                         for n in self.anaqueles_numeros]
+        # Productos dentro de las areas (25-sep-2026). Los edita el lienzo;
+        # aqui solo se guardan para restaurarlos al abrir.
+        self.anaqueles_productos     = list(anaqueles_productos or [])
         # ETAPA 2 — toggle VLM
         self.vlm_enabled_boolean     = bool(vlm_enabled_boolean)
         self.callback_save_data      = callback_save_data
@@ -403,10 +409,12 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             anaqueles=self.anaqueles,
             anaqueles_activate=self.anaqueles_boolean,
             anaqueles_etiquetas=self.anaqueles_nombres,
+            anaqueles_productos=self.anaqueles_productos,
             **self.kwargs_puerta(),
         )
         self.imagen_label.point_change.connect(self.save_point)
         self.imagen_label.anaqueles_change.connect(self.save_anaqueles)
+        self.imagen_label.productos_change.connect(self.save_productos)
         self.conectar_puerta(self.imagen_label)
         self.imagen_label.setAlignment(Qt.AlignCenter)
         self.imagen_label.installEventFilter(self)
@@ -618,6 +626,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                                            .get_anaqueles_coordinates(w, h),
                     "anaqueles_activate": self.anaqueles_boolean,
                     "anaqueles_nombres": self._nombres_anaqueles(),
+                    # Productos dentro de esas areas (25-sep-2026). Tambien
+                    # por la ruta de ventana (`render_box_captura`).
+                    "anaqueles_productos": self.imagen_label
+                                               .get_productos_coordinates(w, h),
                     # Umbral de cruce dibujado con la puerta direccional:
                     # [[x1,y1],[x2,y2]] en pixeles; DENTRO —el lado de la
                     # cabeza verde ENTRADA— a la derecha de P1→P2. Viaja
@@ -1026,6 +1038,78 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self._save_all("anaqueles", poligonos)
         self._save_all("anaqueles_boolean", self.anaqueles_boolean)
 
+    # ── Productos dentro de las areas (25-sep-2026) ──────────────────────
+    def save_productos(self, productos):
+        self.anaqueles_productos = productos
+        self._save_all("anaqueles_productos", productos)
+
+    def _pedir_nombre_producto(self, titulo, texto, actual=""):
+        """El nombre lo escribe el operador («Nescafé Gold»): es lo que el
+        informe de marketing enseña. `None` si cancela."""
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+        from elde_core.ui.productos_anaquel import MAX_NOMBRE
+        # El texto inicial va POSICIONAL, como en `device_panel.py`: es la
+        # forma de llamada que ya corre en este cliente.
+        nombre, ok = QInputDialog.getText(self, titulo, texto,
+                                          QLineEdit.Normal, actual)
+        if not ok:
+            return None
+        return str(nombre or "").strip()[:MAX_NOMBRE]
+
+    def _agregar_producto(self, anaquel):
+        area = self._nombres_anaqueles_todas()[anaquel]
+        nombre = self._pedir_nombre_producto(
+            "Nuevo producto", f"Nombre del producto en {area}:")
+        if nombre is None:
+            return
+        if self.imagen_label.agregar_producto(anaquel, nombre):
+            # El lienzo enciende las areas para que el producto se vea; el
+            # interruptor del recuadro tiene que decir lo mismo.
+            if not self.anaqueles_boolean:
+                self.anaqueles_boolean = True
+                self._save_all("anaqueles_boolean", True)
+
+    def _renombrar_producto(self, indice):
+        actual = self.imagen_label.productos.nombre_visible(indice)
+        nombre = self._pedir_nombre_producto(
+            "Renombrar producto", "Nombre nuevo:", actual)
+        if nombre is not None:
+            self.imagen_label.renombrar_producto(indice, nombre)
+
+    def _quitar_producto(self, anaquel):
+        self.imagen_label.quitar_producto(anaquel)
+
+    def _nombres_anaqueles_todas(self):
+        """Nombre de CADA area dibujada, este o no encendido el interruptor
+        (`_nombres_anaqueles` devuelve vacio con las areas apagadas, y el
+        menu tiene que poder listarlas igual)."""
+        nombres = list(self.anaqueles_nombres or [])
+        return [(str(nombres[i]).strip()
+                 if i < len(nombres) and str(nombres[i]).strip()
+                 else f"Área {i + 1}")
+                for i in range(len(self.imagen_label.anaqueles))]
+
+    def _build_productos_menu(self, menu):
+        """Submenu por area: añadir, renombrar y quitar el ULTIMO producto
+        (solo el ultimo: el servidor identifica cada producto por su
+        posicion dentro del area, ver `productos_anaquel.py`)."""
+        productos = self.imagen_label.productos
+        for i, area in enumerate(self._nombres_anaqueles_todas()):
+            suyos = productos.de_anaquel(i)
+            sub = menu.addMenu(f"{area} ({len(suyos)})")
+            sub.setStyleSheet(self._MENU_QSS)
+            sub.addAction("Añadir producto…",
+                          lambda *_, i=i: self._agregar_producto(i))
+            renombrar = sub.addMenu("Renombrar")
+            renombrar.setStyleSheet(self._MENU_QSS)
+            renombrar.setEnabled(bool(suyos))
+            for j in suyos:
+                renombrar.addAction(productos.nombre_visible(j),
+                                    lambda *_, j=j: self._renombrar_producto(j))
+            quitar = sub.addAction("Quitar ultimo producto",
+                                   lambda *_, i=i: self._quitar_producto(i))
+            quitar.setEnabled(bool(suyos))
+
     def _nombres_anaqueles(self):
         """Nombres paralelos a las zonas enviadas: la numeracion GLOBAL
         («Anaquel 7»), unica entre camaras. Respaldo por indice si algun
@@ -1116,6 +1200,14 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         quitar = menu.addAction("Quitar ultima area",
                                 lambda *_: self._quitar_anaquel())
         quitar.setEnabled(n > 0)
+        # Productos DENTRO de cada area (25-sep-2026): reparten sus agarres.
+        # Sin areas no hay donde meterlos.
+        productos = menu.addMenu(
+            f"Productos del anaquel "
+            f"({len(self.imagen_label.productos.productos)})")
+        productos.setStyleSheet(self._MENU_QSS)
+        productos.setEnabled(n > 0)
+        self._build_productos_menu(productos)
         menu.addSeparator()
         # La puerta tiene ADEMAS su boton en la barra (es lo que se busca al
         # calibrar); aqui se repite para quien venga al menu de ROI

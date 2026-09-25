@@ -69,6 +69,39 @@ def _valida_poligono(v: Optional[Poligono], nombre: str) -> Optional[Poligono]:
     return v
 
 
+class ProductoAnaquel(BaseModel):
+    """Un producto dibujado DENTRO de un área de anaquel (25-sep-2026).
+
+    Sirve para una sola cosa: repartir los AGARRES del área entre lo que hay
+    en la balda («Nescafé Gold» frente a «Colcafé»). El servidor ya sabía en
+    qué punto exacto entraba la muñeca; con esto sabe además qué producto
+    había ahí.
+
+    La validación es SOLO de forma, y a propósito. Un campo declarado con un
+    valor mal formado tira el frame ENTERO en modo estricto (lo que sí
+    perdona `validacion_contrato` es el campo DESCONOCIDO, no el malo), así
+    que aquí no se comprueba que `anaquel` exista entre las áreas del frame:
+    un producto huérfano lo ignora el servidor, igual que un rótulo de
+    puerta sobrante (ver `puertas_nombres`). Convertirlo en error dejaría la
+    cámara sin vídeo por un desfase que no le quita nada a nadie.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    #: A qué área pertenece: su ÍNDICE en `anaqueles_zonas` del mismo frame.
+    anaquel: int
+    #: Lo escribe el operador. Mismo tope que el resto de nombres del
+    #: contrato; el cliente recorta antes para no llegar nunca aquí.
+    nombre: str = Field(default='', max_length=120)
+    #: En píxeles del frame enviado, como las áreas.
+    poligono: Poligono = Field(default_factory=list)
+
+    @field_validator('poligono')
+    @classmethod
+    def _poligono_ok(cls, v):
+        return _valida_poligono(v, 'poligono')
+
+
 class FrameInference(BaseModel):
     """Cliente -> servidor. Un frame a analizar y la configuracion activa.
 
@@ -181,6 +214,12 @@ class FrameInference(BaseModel):
     anaqueles_activate: bool = False
     anaqueles_zonas: Optional[List[Poligono]] = None
     anaqueles_nombres: Optional[List[str]] = None
+    #: Productos dibujados dentro de esas áreas (25-sep-2026). Lista vacía o
+    #: ausente = nadie dibujó productos: los agarres se cuentan por área,
+    #: exactamente como antes. Un servidor anterior a este campo NO pierde
+    #: frames por él: `validacion_contrato` deja pasar los campos que no
+    #: conoce (desde el 7-sep) y solo los apunta en el log.
+    anaqueles_productos: Optional[List[ProductoAnaquel]] = None
 
     # ── Puertas: N umbrales con nombre, uno por acceso (7-sep-2026) ──
     # Cada puerta es un SEGMENTO `[[x1,y1],[x2,y2]]` en pixeles del frame,

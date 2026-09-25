@@ -252,6 +252,8 @@ class MainWindow(QMainWindow):
                                                      None),
                 puerta_boolean             = cfg.get("puerta_boolean", False),
                 anaqueles_numeros          = cfg.get("anaqueles_numeros", []),
+                # Productos dibujados dentro de las areas (25-sep-2026).
+                anaqueles_productos        = cfg.get("anaqueles_productos", []),
                 # Munecas del anaquel: ayuda de calibracion, apagada por
                 # defecto y persistida por camara como el resto de la vista.
                 munecas_boolean            = cfg.get("munecas_boolean", False),

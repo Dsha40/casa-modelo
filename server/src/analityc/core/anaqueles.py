@@ -57,6 +57,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
+from . import anaqueles_productos
 from .anaqueles_pose import PoseMunecas
 from .anaqueles_registro import GRID_DIM, RegistroAnaqueles
 from .estacionamiento_escena import DetectorEscena
@@ -208,6 +209,10 @@ class MedidorAnaqueles:
         self._cajas_area: List[Tuple[float, float, float, float]] = []
         self._nombres: List[str] = []
         self._firma_zonas: Any = None
+        #: área -> productos dibujados dentro (25-sep-2026). Solo reparten
+        #: los agarres del área; no deciden si hubo agarre.
+        self._productos: Dict[int, List[anaqueles_productos.Producto]] = {}
+        self._firma_productos: Any = None
 
         #: (área, pid) -> ts en que entró a la compuerta (estancia en curso).
         self._compuerta_desde: Dict[Tuple[int, str], float] = {}
@@ -348,6 +353,27 @@ class MedidorAnaqueles:
             # Asegura el área en el registro con su nombre vigente.
             self.registro.area(i, self._nombre(i))
 
+    def poner_productos(self, crudo: Optional[Sequence[Any]]) -> None:
+        """Adopta los productos del frame actual. Llamar DESPUÉS de
+        `poner_zonas`: un producto solo vale si su área existe.
+
+        Mismo patrón que las zonas: se reconstruye solo si algo cambió, y
+        cada producto nuevo se da de alta en el registro para que la API lo
+        liste aunque nadie lo haya tocado todavía.
+        """
+        firma = anaqueles_productos.firma(crudo, len(self._poligonos))
+        if firma == self._firma_productos:
+            return
+        self._firma_productos = firma
+        self._productos = anaqueles_productos.productos_por_area(
+            crudo, len(self._poligonos))
+        self._registrar_productos()
+
+    def _registrar_productos(self) -> None:
+        for idx, productos in self._productos.items():
+            for posicion, nombre, _poligono in productos:
+                self.registro.producto(idx, posicion, nombre)
+
     def _nombre(self, idx: int) -> str:
         if idx < len(self._nombres) and str(self._nombres[idx]).strip():
             return str(self._nombres[idx]).strip()
@@ -379,6 +405,7 @@ class MedidorAnaqueles:
             self._descartes.clear()
             for i in range(len(self._poligonos)):
                 self.registro.area(i, self._nombre(i))
+            self._registrar_productos()
 
         # 1. Guardia de escena: el canal de iVMS cambió → las áreas están
         #    sobre OTRA escena. Se limpia lo efímero y se SUSPENDE. v3: la
@@ -1118,7 +1145,7 @@ class MedidorAnaqueles:
         self._agarres_recientes.setdefault(idx, deque(maxlen=40)).append(
             (pend['t'], pend['x'], pend['y'], pend['ancho'], pend['tid']))
         self._contar_agarre(idx, pend['pid'], pend['tid'], demografia,
-                            pend['t'])
+                            pend['t'], x=pend['x'], y=pend['y'])
 
     def _guardar_refs(self, frame: np.ndarray,
                       personas_por_area: Dict[int, int],
@@ -1173,12 +1200,43 @@ class MedidorAnaqueles:
                     self.camera_id, total, self._nombre(idx), _corto(pid))
 
     def _contar_agarre(self, idx: int, pid: str, tid: Any,
-                       demografia: Any, t: float) -> None:
+                       demografia: Any, t: float,
+                       x: Optional[float] = None,
+                       y: Optional[float] = None) -> None:
         total = self.registro.sumar(idx, 'agarres', self._nombre(idx))
         genero, rango = self._rasgos(demografia, tid)
-        self._evento('agarre', idx, pid, genero, rango, t)
-        logger.info("anaqueles[%s] AGARRE #%d en %s (%s)",
-                    self.camera_id, total, self._nombre(idx), _corto(pid))
+        producto = self._repartir_a_producto(idx, x, y)
+        self._evento('agarre', idx, pid, genero, rango, t, producto=producto)
+        logger.info("anaqueles[%s] AGARRE #%d en %s%s (%s)",
+                    self.camera_id, total, self._nombre(idx),
+                    f' → {producto}' if producto else '', _corto(pid))
+
+    def _repartir_a_producto(self, idx: int, x: Optional[float],
+                             y: Optional[float]) -> Optional[str]:
+        """Suma el agarre al producto bajo la muñeca. Devuelve su nombre.
+
+        Sin productos en el área no se toca nada: el conteo por área es
+        exactamente el de antes del 25-sep. Con productos, lo que no cae en
+        ninguno va a `agarres_sin_producto`, que es la señal de que están
+        mal dibujados. Nunca lanza: repartir es un extra y no puede costar
+        el agarre, que ya está contado arriba.
+        """
+        productos = self._productos.get(idx)
+        if not productos or x is None or y is None:
+            return None
+        try:
+            encontrado = anaqueles_productos.producto_en(productos, x, y)
+            if encontrado is None:
+                self.registro.sumar_sin_producto(idx)
+                return None
+            posicion, nombre = encontrado
+            self.registro.sumar_producto(idx, posicion, nombre)
+            return nombre
+        except Exception as exc:                            # noqa: BLE001
+            logger.error("anaqueles[%s]: no se pudo repartir el agarre de "
+                         "%s entre sus productos: %s", self.camera_id,
+                         self._nombre(idx), exc)
+            return None
 
     @staticmethod
     def _rasgos(demografia: Any, tid: Any
@@ -1196,8 +1254,8 @@ class MedidorAnaqueles:
 
     def _evento(self, tipo: str, idx: int, pid: str,
                 genero: Optional[str], rango: Optional[str],
-                t: float) -> None:
-        self._feed.append({
+                t: float, producto: Optional[str] = None) -> None:
+        evento = {
             'tipo': tipo,
             'area': idx,
             'nombre': self._nombre(idx),
@@ -1205,7 +1263,12 @@ class MedidorAnaqueles:
             'genero': genero,
             'rango_etario': rango,
             'id_corto': _corto(pid),
-        })
+        }
+        # Solo cuando hay producto: el panel lee el feed con .get y la clave
+        # de dedup no la incluye, así que un cliente viejo no se entera.
+        if producto:
+            evento['producto'] = producto
+        self._feed.append(evento)
         self._feed_sucio = True
 
     def _limpiar_efimero(self) -> None:
@@ -1426,9 +1489,12 @@ class Anaqueles(TiendasProcess):
 
         zonas = getattr(self, '_anaqueles_zonas', None) or []
         nombres = getattr(self, '_anaqueles_nombres', None) or []
+        productos = getattr(self, '_anaqueles_productos', None) or []
         if not bool(getattr(self, '_anaqueles_activate', True)):
-            zonas, nombres = [], []
+            zonas, nombres, productos = [], [], []
         self._medidor.poner_zonas(zonas, nombres)
+        # Después de las zonas: un producto solo vale si su área existe.
+        self._medidor.poner_productos(productos)
 
         return self._medidor.procesar(
             image, self._tracks_de(camera_id),
