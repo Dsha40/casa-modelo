@@ -1,908 +1,755 @@
 # CLAUDE.md — ELDE Tiendas (contexto de trabajo)
 
-Traspaso de las sesiones del 16-18 sep, 21-22 sep, 23-sep y **24-sep** 2026.
-**Este archivo SÍ se commitea**: vive en la rama para que la siguiente sesión
-lo lea sin que el usuario tenga que pegarlo.
+Traspaso de las sesiones del 16-18, 21-22, 23, 24, 25, 28 y **29 de
+septiembre de 2026**. **Este archivo SÍ se commitea**: vive en la rama para
+que la siguiente sesión lo lea sin que el usuario tenga que pegarlo.
 
-Rama de trabajo actual: **`feature/anaquel`** (publicada), que cuelga de
-`fix/gender` → `claude/pensive-galileo-aymjr3` →
-`fix/eliminar_vigilantes_amazonas` (no de `main`). Al cambiarte a ella heredas
-todo lo anterior.
+**Rama actual: `feature/anaquel`** (publicada). Cuelga de `fix/gender` →
+`claude/pensive-galileo-aymjr3` → `fix/eliminar_vigilantes_amazonas`, **no de
+`main`**. Al cambiarte a ella heredas todo lo anterior.
 
-**Hay DOS sesiones de Claude trabajando en paralelo** (24-sep): esta, en el
-Linux del usuario junto al servidor, y otra en el **cliente** de Windows. No
-se ven entre ellas: lo único que comparten es lo que quede commiteado aquí.
-Si vienes de la del cliente, tu encargo está en «Encargo para la sesión del
-CLIENTE», al final.
+**Hay DOS sesiones de Claude en paralelo:** una en el Linux del usuario, junto
+al servidor, y otra en el **cliente** de Windows. No se ven entre ellas: solo
+comparten lo que quede commiteado aquí. La del cliente tiene su encargo en la
+**sección 9** (reescrita el 29-sep). Hasta el 29-sep la sesión del cliente no
+había subido nada al remoto.
 
-**El 23-sep se midió por primera vez sobre PRODUCCIÓN REAL** (14 h de log y la
-base del usuario), y eso corrigió conclusiones que venían de muestras cortas.
-Donde este archivo dé una cifra, mira su fecha: las del 23-sep mandan.
+**Donde este archivo dé una cifra, mira su fecha.** Las cifras de horas o días
+de producción mandan sobre las de minutos de vídeo.
 
 ---
 
-## EL MODO DE TRABAJO CAMBIÓ OTRA VEZ (24-sep) — léelo antes que nada
+## 0. Lo primero
 
-| | 16-18 sep | 21-23 sep | **24-sep (HOY)** |
-|---|---|---|---|
-| Dónde corre Claude | Windows del usuario | contenedor remoto, efímero | **DENTRO del contenedor del usuario** |
-| Acceso al servidor | no | no | **SÍ: log, base, capturas, modelos** |
-| GPU | no | no (CPU, 0,65 s/frame) | **SÍ: 2× RTX 3090 Ti + 1× 5060 Ti** |
-| Servidor + Claude a la vez | imposible | imposible | **posible** (sobra GPU) |
-| Validación en vivo | log pegado | log pegado | **se lee sola** |
+### Lee tú mismo estos archivos al empezar
 
-Verificado el 24-sep: `hostname` = `51b31f634ba9`, existe `/.dockerenv`, y el
-venv del proyecto (`.venv`, Python 3.12.13) trae `cv2 4.12.0`,
-`torch 2.8.0+cu128` y `cuda True`. **No hay cliente `docker` ni acceso al
-demonio**, así que Claude no puede crear contenedores: comparte el del
-usuario.
-
-**El riesgo cambió de sitio.** Antes el contenedor era desechable; ahora todo
-lo que Claude toca es el entorno REAL del usuario. Reglas de convivencia
-acordadas el 24-sep:
-
-1. **No instalar nada en `.venv`** sin pedirlo: ya tiene lo que hace falta.
-2. Los arneses van al **scratchpad**, nunca al repo.
-3. **No tocar `output/`, `logs/` ni `models/`**: ahí viven sus datos reales.
-   Para medir, exporta `ELDE_TIENDA_DB` al scratchpad y haz `os.chdir()` allí
-   — `CAPTURE_DIR` y la ruta de la base son RELATIVAS al directorio de
-   trabajo, así que el chdir las desvía solo.
-4. Sigue pidiendo permiso antes de cada commit y cada push.
-
-**Herramientas que NO existen en este contenedor** (comprobado a la mala):
-`ss` (usa `curl` contra `/health` para ver si el servidor escucha) y `docker`.
-
-### Arrancar el servidor desde aquí
-
-```bash
-cd /home/D-arias365/proyectos/ELDE-TIENDAS/server
-../.venv/bin/python iniciar_servidor_headless.py      # puerto 9000
-curl -s http://localhost:9000/health                  # comprobar
-```
-
-⚠️ Bloquea la terminal: lánzalo con `nohup ... &`. Y **la salida por `stdout`
-va AMORTIGUADA**: al capturarla con un pipe salen ráfagas de hasta 57 líneas
-con la misma marca de tiempo. Para medir ritmos **no uses tus propias marcas,
-usa el contador `Frame N` del servidor**, que es exacto.
-
-### Cómo montar el entorno de pruebas
-
-**Si corres en el contenedor del usuario (lo normal desde el 24-sep): NO HAY
-QUE MONTAR NADA.** Usa `.venv/bin/python`, que ya trae todo y además tiene
-GPU. Instalar cosas ahí sin permiso rompe su entorno.
-
-Lo de abajo es para un contenedor PROPIO (nube o efímero), donde no viene
-nada. Deja la suite **entera en verde** (el índice de PyTorch está bloqueado
-por el proxy; **torch hay que sacarlo de PyPI**):
-
-```bash
-# La version de OpenCV NO es opcional: ver abajo.
-pip install numpy pytest "opencv-contrib-python-headless==4.12.0.88" fastapi \
-            msgpack supervision torch httpx onnxruntime rfdetr psutil \
-            py-cpuinfo python-multipart reportlab timm torchreid gdown \
-            tensorboard
-# Los pesos van por Git LFS y git-lfs NO viene en el contenedor:
-apt-get install -y git-lfs && git lfs install --local && git lfs pull
-cd server && python3 -m pytest tests -q
-```
-
-**Línea base medida el 23-sep: `792 passed, 15 skipped, 0 failed`.**
-
-La línea base vieja («767 passed, 4 failed, los 4 son del contenedor») **está
-obsoleta**: 3 fallos eran por `reportlab` y 1 por los pesos de Git LFS. Con
-esas dos cosas instaladas **no hay ningún fallo aceptable**. Si ves uno, es
-tuyo.
-
-⚠️ **`torchreid` rompe ese `pip install` ENTERO** (medido el 23-sep): no
-compila con el `setuptools` de Debian (`AttributeError: install_layout`), y
-como pip aborta el lote **no se instala ni un solo paquete**, no solo
-torchreid. Hay que hacerlo en dos pasos:
-
-```bash
-pip install <todo lo de arriba MENOS torchreid>
-SETUPTOOLS_USE_DISTUTILS=stdlib pip install torchreid
-```
-
-Y las pruebas de `packages/elde_core` necesitan además `PySide6`, `cffi`,
-`cryptography` y las librerías de Qt (`apt-get install -y libegl1 libgl1
-libxkbcommon0 libdbus-1-3 libfontconfig1`). **Su suite tiene 71 fallos
-PREEXISTENTES** (tests que nombran a otros clientes): no son tuyos. Medido el
-23-sep guardando los cambios con `git stash` y corriéndola sin ellos.
-
-**Dos trampas que costaron horas el 23-sep:**
-
-1. **`opencv-contrib-python-headless` SIN versión te da la 5.x, y eso tumba
-   TODO el stack facial**, no solo lo que quita. `tiendas_modelos.py:278` carga
-   todos los modelos dentro de **un solo `try/except`**, y el primer `readNet`
-   de los modelos Caffe viejos revienta en OpenCV 5 («Caffe importer has been
-   removed») llevándose por delante YuNet, InsightFace, ArcFace y OSNet. El
-   síntoma es demoledor: el servidor arranca «bien» y no reconoce a nadie.
-   Comprobación: `p._reidentifier.is_available` y `p._demographics.is_available`
-   deben dar `True`.
-2. **Sin los pesos de Git LFS no hay pipeline.** Se descargan sin problema
-   desde el contenedor; lo que falta es el binario `git-lfs`.
-
-Comprobación oficial del README (debe imprimir la línea, sin reventar):
-
-```bash
-python3 -c "import cv2, torch, onnxruntime, rfdetr, transformers, supervision, torchreid; assert hasattr(cv2,'ximgproc'); print('cv2', cv2.__version__)"
-```
-
-`verificar_entorno.py` sale con **código 1 en el contenedor** (no hay GPU) y
-con **0 en el Linux del usuario**. No es un fallo: el script hace su trabajo.
-
----
-
-## Qué es este repositorio (léelo antes de tocar nada)
-
-**Es un maquetado de otro repo.** Se sacó del monorepo ELDE (vigilante
-perimetral, estacionamiento, comedor, stand de degustación y cuatro clientes
-de escritorio) y **se está ajustando a un proyecto nuevo de tiendas**. Por eso:
-
-- Mucho código heredado **probablemente no funcione aquí, y es esperable**: lo
-  que depende de `vigilante_amazonas`, WhatsApp, Jarvis, los modos Stand y
-  Permanencia, los DVR, o los tests que nombran a otros clientes. Que algo
-  heredado falle **no es una regresión**.
-- Antes de arreglar o reconstruir algo heredado, **pregunta si el proyecto
-  nuevo lo necesita**. No lo reconstruyas sin que te lo pidan.
-- Lo que se usa hoy: el cliente `clients/tienda` capturando ventanas de
-  iVMS-4200, el modo `Tiendas`, el servidor en Linux y `/dashboards/tienda/`.
-
-### El caso de uso real
-
-**Un pasillo de anaqueles de supermercado.** Pasa mucha gente. La gente
-**mira los productos, no la cámara**, y las caras del fondo miden ~20 px.
-
-**Estado real del montaje (23-sep) — no asumas que las cuatro funcionan:**
-
-| Cámara | `camera_id` | Estado | Personas en base |
-|---|---|---|---:|
-| 1 | `win-iVMS-4200-i58bf7b` | estable | 203 |
-| 2 | `win-iVMS-4200-c2-i58bf7b` | estable | 89 |
-| 3 | `win-iVMS-4200-c4-i58bf7b` | **intermitente**: se cae y vuelve | 19 |
-| 4 | — | **no funciona** (error `OpenSDK 105` de reconexión) | 0 |
-| prueba | `win-HD_CCTV_Camera_...` | vídeo de YouTube, NO es una cámara | 3 |
-
-Las 19 personas de la c4 frente a 203 y 89 son la huella de la intermitencia.
-
-**Las imágenes van DESFASADAS entre cámaras** (observado por el usuario, no
-medido). Importa: enlazar a la misma persona entre dos cámaras es más fácil si
-ambas la ven a la vez. Es candidato a explicar por qué solo 47 de 292
-apariciones se enlazan, pero **no está comprobado**.
-
-El vídeo de prueba está doblemente comprimido y **rechaza casi todas las
-caras** (rechazos por nitidez: 26,8 % ahí frente a 3,1 % en la cámara real).
-Si el usuario pega un log, **pregunta de qué fuente es antes de concluir**.
-
----
-
-## LO PRIMERO: lee estos archivos tú mismo
-
-**Es de suma importancia.** Al empezar la sesión, lee **completos y con tus
-propias herramientas** estos cuatro archivos. **No los delegues en un agente**
-y no te conformes con un resumen ajeno: el usuario lo exige. Verificado el
-22-sep que los cinco existen.
+**Es de suma importancia.** Léelos **completos y con tus propias
+herramientas**, no los delegues en un agente ni te fíes de un resumen ajeno:
 
 1. `README.md` (raíz)
 2. `clients/tienda/README.md`
-3. `clients/tienda/EQUIPO.md`
+3. `clients/tienda/EQUIPO.md` (es de otro cliente y dice `git add .`: aquí NO)
 4. `GUIA.md`
 
-Según el tema, lee también tú (no un agente) `server/README_DEMOGRAFIA.md`.
+Según el tema, lee también `server/README_DEMOGRAFIA.md` y `server/README.md`
+(tabla de modelos esenciales y opcionales; peso de cada rama en la votación:
+facial 1.0, corporal 0.5). Para búsquedas amplias puedes usar agentes, pero
+verifica tú con `archivo:línea` lo que devuelvan antes de afirmarlo.
 
-**Para lo demás puedes usar agentes**: búsquedas amplias, explorar muchos
-archivos. Lo que devuelvan es un resumen: antes de afirmarlo, verifícalo tú
-con `archivo:línea`.
+**Desfasado en esos documentos:** `README.md:92` y `GUIA.md:172` dicen «733
+pasan»; la cifra buena está en la sección 1 de este archivo.
 
----
+### Cómo trabajar con este usuario
 
-## Cómo trabajar con este usuario
-
-- **En español.** Si pide «sin tecnicismos», explica con palabras llanas.
-- **«Sin alucinaciones» es su exigencia n.º 1.** Separa siempre lo *verificado*
-  (con `archivo:línea` o una medida) de lo *deducido* y de lo que *no sabes*.
-  Mide antes de afirmar. **En la sesión del 21-sep hubo que retractar cuatro
-  afirmaciones** (ver «Errores cometidos» abajo): él las detecta.
-- **Explica el procedimiento COMPLETO antes de los comandos**, en orden y con
-  los pasos numerados. El 22-sep se quejó, con razón, de recibir un `grep` con
-  un `<tu-log>` sin explicar y un `mv` suelto al final sin contexto.
-- **Avísale cuando un comando vaya a bloquear la terminal.** Un
-  `python servidor.py | grep ...` deja el servidor en primer plano y parece
-  colgado. Ya pasó.
-- **Los procesos largos asustan.** Si la suite tarda 2 minutos, dilo antes.
-  El 21-sep interrumpió una ejecución creyendo que estaba trabado.
-- **Respeta los nombres que elija** (renombró `fallo_pipeline` a
-  `fallo_imagen_IA_pipeline`).
-- **Nunca uses credenciales pegadas en el chat.** Ya pegó un token de GitHub
-  (lo revocó). Que se autentique él.
-- **PIDE PERMISO ANTES DE CADA COMMIT Y DE CADA PUSH.** Lo exigió el 22-sep,
-  después de que una sesión commiteara y publicara dos arreglos por su cuenta
-  amparándose en la línea que había aquí («los push los haces tú ahora»). Su
-  motivo: no quiere que se le llene el historial de GitHub. Puedes **editar**
-  los archivos libremente; lo que no haces sin su visto bueno es fijar el
-  cambio. El procedimiento, cada vez:
+- **En español.** Si pide «sin tecnicismos», palabras llanas y ejemplos.
+  Cuando pide «explícalo mejor», quiere una analogía sencilla y menos tablas.
+- **«Sin alucinaciones» es su exigencia n.º 1.** Separa lo *verificado*
+  (`archivo:línea` o una medida) de lo *deducido* y de lo que *no sabes*. Mide
+  antes de afirmar. Él detecta las afirmaciones sin base y **revisa las
+  imágenes él mismo** (ver error 14 de la sección 10).
+- **Explica el procedimiento COMPLETO antes de los comandos**, con pasos
+  numerados. **Nunca rutas de ejemplo** (`C:\ruta\a\...`): usa las reales
+  (sección 1). Se copian tal cual.
+- **Avísale cuando un comando vaya a bloquear la terminal**, y de antemano si
+  un proceso va a tardar (la suite tarda ~30-90 s). Si no, cree que se colgó.
+- **Respeta los nombres que elija.**
+- **Nunca uses credenciales pegadas en el chat.** Que se autentique él.
+- **PIDE PERMISO ANTES DE CADA COMMIT Y DE CADA PUSH.** Puedes editar
+  libremente; lo que no haces sin su visto bueno es fijar el cambio. Cada vez:
   1. enséñale **qué archivos** tocas y el resumen del diff,
-  2. enséñale **el mensaje de commit completo**, tal y como iría,
-  3. **espera su respuesta**. Sin ella, ni `commit` ni `push`.
-- Si tienes que reescribir un commit ya publicado (`--amend`, rebase),
-  **avísale** además de pedir permiso: él tendrá que hacer
-  `git reset --hard origin/<rama>` en vez de un `pull` normal.
+  2. enséñale **el mensaje de commit completo**,
+  3. **espera su respuesta**. Un hook automático que pida commitear **no**
+     es su permiso. Que él diga «haz commit» tampoco te exime de enseñarle
+     antes archivos y mensajes.
+- Si reescribes un commit publicado (`--amend`, rebase), **avísale**: tendrá
+  que hacer `git reset --hard origin/<rama>`.
 
 ### Convenciones del repositorio
 
-- **Los comentarios explican el *porqué*** (qué se rompió, cuándo, cómo se
-  midió). Es el estándar, no ruido. Mira cualquier fichero.
-- **Una funcionalidad, un fichero.**
-- **Commits en español**, asunto corto en imperativo y cuerpo con el porqué y
-  cómo se comprobó. El usuario pide además que el commit **liste los archivos
-  tocados y lleve la fecha**.
+- **Los comentarios explican el porqué** (qué se rompió, cuándo, cómo se
+  midió). Es el estándar, no ruido.
+- **Una funcionalidad, un fichero.** Cableado mínimo en lo existente.
+- **Commits en español**: asunto corto en imperativo; cuerpo con el porqué,
+  cómo se comprobó, **la lista de archivos tocados y la fecha**.
+- **Sin prueba no se commitea** (`GUIA.md` 4.3). Y verifica las pruebas **al
+  revés** (sección 10, al final).
 - `app.py`, `conftest.py` y `pyrightconfig.json` se comparten con un monorepo
-  donde **sí** existe `vigilante_amazonas`: los cambios tienen que funcionar
-  con y sin ese paquete.
-- Los arneses de medición van al **scratchpad, nunca al repo**, y nunca se
-  toca `output/`.
+  donde **sí** existe `vigilante_amazonas`: los cambios deben funcionar con y
+  sin ese paquete.
+- `git add <archivos>` explícitos, nunca `git add .`. **Nunca commitees**
+  `server/models/`, `output/`, `logs/`, el `.env`, el `venv` ni **`informes/`**
+  (informes locales del usuario con fotos de clientes; está en `.gitignore`).
 
 ---
 
-## Errores cometidos (no los repitas)
+## 1. Entorno (verificado del 24 al 29-sep)
 
-Cinco de las sesiones del 21-22 sep y dos del 23, todos detectados y
-corregidos:
+### Dónde corres
 
-1. **`git checkout -- <archivo>` sobre trabajo sin commitear lo BORRA.** Se
-   usó para deshacer una línea de prueba y se llevó el cambio entero. Si
-   necesitas revertir una modificación temporal, guarda el contenido antes o
-   usa un script que reponga exactamente lo que quitaste.
-2. **`por_id={}` del log de arranque NO es de los perfiles de cámara.** Es de
-   los perfiles de **ángulo** (`_camera_angle_by_id`). Se citó como prueba de
-   que el perfil no cargaba; la conclusión era correcta, la evidencia no.
-3. **`COUNT(*)` sobre `tienda_visitas` cuenta FILAS, no personas.** La tabla
-   tiene `UNIQUE (jornada, camera_id, persistent_id)`: una persona en dos
-   cámaras son **dos filas**. Para personas, `COUNT(DISTINCT persistent_id)`.
-4. **Las cifras de `CALIDAD FACIAL` son acumuladas**, no instantáneas (ver
-   abajo). Se compararon dos líneas de sesiones distintas como si fueran
-   mediciones independientes.
-
-5. **Commitear y publicar sin preguntar.** Ocurrió el 22-sep con dos arreglos
-   correctos y probados: el problema no fue el código, fue el procedimiento.
-   El `CLAUDE.md` decía «los `git push` sí los haces tú ahora» y se tomó por
-   permiso permanente. **No lo es.** Ver la regla, con sus pasos, en «Cómo
-   trabajar con este usuario».
-
-6. **Recomendar el modelo PAR fiándose de una telemetría rota.** El indicador
-   `rama_corporal_activa` decía `False` mientras la rama corporal había
-   aceptado 235 muestras, y el contador `body_sin_modelo` sugiere «falta un
-   modelo» cuando cuenta «el modelo corrió y no dio resultado válido». Con esos
-   dos se le dijo al usuario que generara un PAR **que el código nunca habría
-   usado**. Arreglado en `576e53a`. Lección: **una bandera de telemetría es
-   código como el resto y puede estar desactualizada**; contrástala con un
-   contador que no dependa de ella.
-7. **Concluir «el muro es la pose, 48 %» desde 51 segundos de vídeo.** Con 14 h
-   de producción el reparto real es **37,7 % tamaño y 13,6 % pose**. El tramo
-   corto tenía gente pasando cerca. **No saques repartos porcentuales de
-   muestras de minutos**: saca el dato del log acumulado, que cubre jornadas.
-
-Y uno de método que sí salió bien y conviene repetir: **verificar los tests al
-revés**. Desactiva el arreglo y comprueba que la prueba falla; luego
-restáuralo y comprueba que pasa. Un test que pasa siempre no demuestra nada.
-
----
-
-## Entorno
+**Dentro del contenedor Docker `51b31f634ba9` del usuario** (existe
+`/.dockerenv`), repo en `/home/D-arias365/proyectos/ELDE-TIENDAS`, venv
+`.venv` (Python 3.12.13, `cv2 4.12.0`, `torch 2.8.0+cu128`, CUDA). **Ves el
+servidor, su log, su base y sus modelos.** No hay cliente `docker`: no puedes
+crear contenedores.
 
 | | |
 |---|---|
-| **Dónde corres (24-sep)** | **DENTRO** del contenedor `51b31f634ba9` del usuario, repo en `/home/D-arias365/proyectos/ELDE-TIENDAS`, venv `.venv` (Python 3.12.13, CUDA). **Ves el servidor, su log, su base y sus modelos** |
-| **GPUs** | 2× RTX 3090 Ti (24 GB) + 1× RTX 5060 Ti (16 GB). El servidor **usa solo la primera** (`_get_first_gpu`, `app.py:284`) |
-| **Windows del usuario** | Cliente de escritorio. **Otra sesión de Claude trabaja ahí**; no os veis |
-| **Limitación que SIGUE** | El usuario no puede usar el **cliente** y la sesión del cliente a la vez. Por eso el encargo de abajo pide escribir la telemetría a disco |
-| **Contenedor propio** | No se puede: no hay `docker` ni acceso al demonio. Para aislarse, el usuario cambia a la web |
+| GPUs | 2× RTX 3090 Ti (24 GB) + 1× RTX 5060 Ti (16 GB). **Máquina compartida con otros usuarios**: hay memoria y cómputo ajenos en las tres, y **la carga se mueve de una GPU a otra** (28-sep: la GPU 0 al 42 % sin un frame nuestro; horas después, al 1 %). El servidor usa **la primera GPU visible** (`_get_first_gpu`, `app.py:284`; enumeración en `hardware_available.py:21-27`) |
+| Ver QUÉ usa nuestro proceso | `nvidia-smi pmon -c 5 -s u` (uso por proceso). `--query-compute-apps` solo muestra los procesos de este contenedor; la memoria ajena no aparece ahí pero sí en el total |
+| Máquina anfitriona | se llama **`pop-os`**. La carpeta del proyecto es, en el anfitrión, `/home/gpu/entorno_trabajadores/datos_D-arias365` |
+| Zona horaria | el contenedor va en **UTC**. Venezuela = UTC−4 |
 
-### Dónde están los logs y los datos (verificado el 22-sep)
+### Reglas de convivencia (el entorno es REAL, no desechable)
 
-| Qué | Dónde |
+1. **No instales nada en `.venv`** sin pedirlo.
+2. Los arneses van al **scratchpad**, nunca al repo.
+3. **No toques `output/`, `logs/` ni `models/`**: son sus datos reales. Para
+   leer la base: `sqlite3.connect('file:output/tienda.db?mode=ro', uri=True)`.
+4. ⚠️ **Para que una prueba no escriba en su base, exporta `ELDE_TIENDA_DB`
+   con una RUTA ABSOLUTA.** Un `os.chdir()` **NO** basta: `ruta_bd()`
+   (`tienda_almacen.py:112`) ancla las rutas relativas a `server/`. En cambio
+   `CAPTURE_DIR` (`config.py:553`) y `HEATMAP_DIR` (`config.py:420`) sí son
+   relativas al directorio de trabajo.
+5. **Las grabaciones de diagnóstico son fotos de clientes**: al scratchpad,
+   nunca al repo, y borrarlas al terminar (con permiso del usuario).
+
+### El cliente de Windows y cómo llega al servidor
+
+| | |
 |---|---|
-| **Log del servidor** | `server/logs/server.log` — rota a 5 MB, 3 copias. Lo fija `iniciar_servidor_headless.py:52-59` (`raiz_proyecto=server/`, `client_type='server'`) |
-| Nivel del log | `ELDE_LOG_NIVEL=DEBUG\|INFO\|...` (defecto INFO), `ELDE_LOG_DIR`, `ELDE_LOG_MB`, `ELDE_LOG_COPIAS` |
-| **Base de datos** | `server/output/tienda.db` (`ELDE_TIENDA_DB`). Tablas `tienda_visitas`, `tienda_eventos`, `tienda_capturas` |
-| Galería de rostros | `server/output/person_db/` — **ya no se usa con la política por defecto** (ver TTL) |
-| Heatmaps | `server/output/heatmap/<device_id>.png` — **el 21-sep la carpeta no existía**: nunca se ha generado uno |
-| Registro de dispositivos | `server/output/registro_dispositivos.json` — la lista de `device_id` vistos |
-| Config del cliente | `%LOCALAPPDATA%\tienda_view\tienda_view\config.json` — **cifrada a propósito, no la descifres**. Ahí está `instalacion.id` |
+| Repo en Windows | `C:\Users\DESARROLLO-7\Desktop\Supermercado` (cliente en `clients\tienda`) |
+| Cómo conecta | por el **túnel SSH de VS Code** (host `elde-gpu`): en Windows, `localhost:9000` es el contenedor. Todas las peticiones llegan desde `127.0.0.1` |
+| Servidor elegido | el cliente guarda el último en `%APPDATA%\ELDE\servidores.json` y **gana al `.env`** (`arranque_servidor.py:16`). `/health` → `servidor_nombre` dice a cuál llega (`51b31f634ba9` = este) |
+| Dashboard desde el navegador de Windows | el 28-sep **no cargaba** aunque el servidor respondía y el cliente sí llegaba: hay que reenviar el puerto 9000 en la pestaña **«Puertos»** de VS Code y usar la «Dirección reenviada». Sin resolver del todo |
+| Bajar ficheros del contenedor a Windows | explorador de VS Code → clic derecho → **«Descargar…»** |
+| Lanzar SOLO el cliente | PowerShell **como Administrador** (iVMS corre elevado y sin admin no se captura su ventana): `cd "C:\Users\DESARROLLO-7\Desktop\Supermercado\clients\tienda"` y `.\venv\Scripts\python.exe src\main.py` |
+| `INICIAR_TIENDA.bat` | se relanza como Administrador (**pierde las variables de entorno** que pongas antes) y **arranca también un servidor en Windows** además del cliente. Para pruebas con variables, lanzar solo el cliente |
+
+### Hay dos servidores posibles
+
+| | Dónde | Cómo se llega |
+|---|---|---|
+| **El del contenedor** | lo arranca Claude o el usuario aquí | `localhost:9000` desde Windows (túnel) |
+| **El de `pop-os`** | en el anfitrión | `72.68.60.141:9000`. **Código desconocido y NO escribe en nuestro log** |
+
+### Arrancar y parar el servidor (así, desde el 29-sep)
+
+```bash
+cd /home/D-arias365/proyectos/ELDE-TIENDAS/server       # DESDE server/
+CUDA_VISIBLE_DEVICES=1 setsid nohup ../.venv/bin/python -u iniciar_servidor_headless.py \
+    > <scratchpad>/servidor.log 2>&1 < /dev/null &
+curl -s http://localhost:9000/health                     # comprobar
+```
+
+- **Desde `server/`.** Desde la raíz, capturas y heatmaps van a
+  `<raíz>/output/` y el dashboard no los ve (hallazgo 20).
+- **`setsid`**: sin él, el servidor lanzado por Claude **murió sin dejar
+  rastro** al cerrarse la sesión (28-sep 15:31; ni error ni OOM). Con `setsid`
+  queda en su propia sesión.
+- **`CUDA_VISIBLE_DEVICES=1`** lo pone en la GPU 1 sin tocar código (la 3090
+  Ti menos cargada el 28-sep). Revisa la carga antes: puede haber cambiado.
+- **`-u`**: sin él la salida va amortiguada (ráfagas con la misma hora).
+- **Parar**: `PID=$(pgrep -f "^../.venv/bin/python -u iniciar_servidor_headless.py$")`
+  y `kill -TERM "$PID"` (se apaga ordenado en 1-11 s y vuelca heatmaps).
+  **Nunca `pkill -f` con un patrón que tenga `|`** (error 11).
+- El cliente **se reconecta solo** tras un reinicio (5-20 s).
+
+**Variables de diagnóstico** (apagadas por defecto; no dejarlas puestas):
+
+| Variable | Qué hace | Cuidado |
+|---|---|---|
+| `ELDE_ANAQUELES_DIAG=1` | el log cuenta, frame a frame, qué ve la máquina del agarre de cada muñeca (profundidad, quietud, armado, recorrido) y por qué descarta | varias líneas por frame: el log rota a 5 MB × 3 y **se pierden los logs viejos** |
+| `ELDE_ANAQUELES_GRABAR=<ruta absoluta>` | graba frames + tracks + áreas + productos de Anaqueles para reproducirlos fuera de línea (`anaqueles_grabador.py`) | **fotos de clientes**; tope `ELDE_ANAQUELES_GRABAR_MAX` (4000 ≈ 11 min) |
+
+**Telemetría de fps (siempre activa desde el 29-sep, `telemetria_fps.py`)**:
+una línea por cámara cada 30 s en el log:
+
+```
+FPS [cam] recibidos=6.1/s procesados=6.1/s descartados=0 proceso=63/114 ms entrada=1790 KB/s (302 KB/frame)
+```
+
+`grep "FPS \[" server/logs/server.log | tail`. `proceso` = mediana/p90 del
+tiempo del frame DENTRO del servidor (no incluye recibirlo por el websocket
+ni enviar la respuesta).
+
+### Las pruebas
+
+**El `.venv` no tiene `pytest` ni `PySide6`.** Sin tocarlo:
+
+```bash
+.venv/bin/python -m pip install --target <scratchpad>/pytest_libs pytest
+cd server && ELDE_TIENDA_DB=<scratchpad>/tienda_pruebas.db PYTHONPATH=<scratchpad>/pytest_libs \
+    ../.venv/bin/python -m pytest tests -q -p no:cacheprovider
+```
+
+**Línea base (29-sep): `849 passed, 16 skipped, 2 xfailed`.** Si ves un
+`failed`, es tuyo. Las de `packages/elde_core` necesitan PySide6: aquí no
+corren; las que nombran a otros clientes (`clients/amazonas`, `detecciones`,
+`perimetrales`) fallan siempre porque esas carpetas no existen en este corte.
+
+**Probar código del cliente sin PySide6 (28-sep):** un doble mínimo de PySide6
+en el scratchpad (`QPoint`, `Signal` con `connect/emit`, `QLabel`, `QPainter`
+que anota llamadas, `Qt` con constantes) más dobles de `cryptography`,
+`win32gui/win32ui/win32con/pyautogui` y un `sitecustomize.py` que pone
+`ctypes.windll`. Con eso se importa `render_box.py` y se ejercitan menús,
+lienzo y payload. **No sustituye a probar en Windows**: pintar y los diálogos
+reales solo los ve el usuario.
+
+En un contenedor propio (nube), mira `README.md`: `torchreid` rompe el
+`pip install` entero (instalarlo aparte con `SETUPTOOLS_USE_DISTUTILS=stdlib`)
+y `opencv-contrib-python-headless` **tiene que ser la 4.12.0.88**.
+
+### Trampas de este contenedor
+
+- **No existen `ss` ni `docker`.** Para saber si el servidor escucha: `curl`.
+- **`awk` no tiene `strtonum`**, y si silencias sus errores la comprobación
+  «pasa». No silencies errores en una verificación.
+- **`pkill -f <patrón>` se mata a sí mismo** si el patrón aparece en tu propio
+  comando, y un `|` en el patrón es un «o» de regex (error 11).
+- **`rm` con variables** (`rm -f "$D/$x"`) lo bloquea un control de seguridad:
+  usa `"${D:?}/${x:?}"` o, mejor, no borres: descarga a scratchpad y copia.
+- **A veces la herramienta Bash deja de responder** («classifier gave no
+  verdict»). Es pasajero; mientras, `Read` sigue funcionando (logs, `.git/`).
 
 ---
 
-## Cómo funciona (recorrido de un frame)
+## 2. Qué es este repositorio
 
-1. `clients/tienda/src/main.py` elige servidor
-   (`elde_core/red/arranque_servidor.py`) y abre `gui/windows_main.py`.
-2. Recuadro = `gui/components/render_box/render_box.py`. Fuente: una ventana
-   (`elde_core/capture/capture_worker.py`) o un DVR (`rtsp_worker.py`).
-3. Con la IA encendida hay **un frame en vuelo por recuadro**.
-4. `camera_id` = `elde_core/ui/identidad_camara.py`, función `device_id()`:
-   ventana `win-<título>[-cN]-i<instalación>`; DVR `dvr-<serie>-<canal>`; si
-   no, `box-N`.
-5. Servidor `server/src/app/app.py`: contrato, cola del último frame **por
-   cámara** (`ws_drenaje.py`, reparto round-robin), `_full_frame_sync` →
-   `process_image_sync` → `TiendasProcess.process_frame`.
-6. Pipeline: RF-DETR (`deteccion_compartida.py`) → ByteTrack **por cámara** →
-   identidad (`analytics/face_reidentifier.py`) → entradas/salidas con
-   histéresis → demografía (`analytics/demographics.py`) → `tienda_almacen.py`
-   (SQLite, por jornada).
-7. Respuesta: el mismo mensaje con `data` sustituido. En modo directo solo
-   viajan `metadata.detections` y el cliente las pinta.
-8. Lectura: `/dashboards/tienda` ← `/api/v1/tienda/*` (`api_tienda.py`);
-   `/dashboard` antiguo (`dashboard.py`).
+**Un maquetado del monorepo ELDE** que se está ajustando a un proyecto de
+tiendas. Mucho código heredado **no funciona aquí y es esperable**
+(`vigilante_amazonas`, WhatsApp, Jarvis, Stand, tests de otros clientes).
+**Antes de arreglar algo heredado, pregunta si el proyecto lo necesita.**
+Tampoco viajaron el `PLAN.md` ni los scripts de etiquetado que cita
+`README_DEMOGRAFIA.md`.
+
+**Caso de uso:** un pasillo de supermercado (baldas de café). Pasa mucha
+gente, **mira los productos, no la cámara**, y las caras del fondo miden
+~20 px.
+
+| Cámara | `camera_id` | Estado |
+|---|---|---|
+| 1 | `win-iVMS-4200-i58bf7b` | estable |
+| 2 | `win-iVMS-4200-c2-i58bf7b` | estable |
+| **3** | **`win-iVMS-4200-c3-i58bf7b`** | **baldas de café**; la más medida (24-25 sep) |
+| 4 | `win-iVMS-4200-c4-i58bf7b` | intermitente |
+| — | — | una quinta no funciona (`OpenSDK 105`) |
+| **vídeo** | **`win-Media_Player-c3-i58bf7b`** | **grabación del 23-sep de la cámara 3** (reloj de cámara ~10:44-11:24) en un reproductor. Doblemente comprimida. **Caso de referencia del agarre:** una clienta coge botes de **Coffee-mate** de la balda ALTA hacia las **11:20:46-11:21:11** (reloj de la cámara) |
+
+Si el usuario pega un log o pide medir, **pregunta de qué fuente es** antes de
+concluir: en el log, `Media_Player` es el vídeo, `iVMS` la tienda en vivo.
+
+---
+
+## 3. Cómo funciona
+
+1. El cliente (`clients/tienda/src/main.py`) elige servidor y abre la ventana.
+   Cada **recuadro** (`render_box.py`) captura una ventana o un DVR.
+2. `camera_id`: `elde_core/ui/identidad_camara.py` (`win-<título>[-cN]-i<inst>`).
+   **Los nombres cambian a menudo** (título de ventana, canal, instalación).
+3. Servidor `app.py` → cola del último frame por cámara (`ws_drenaje.py`;
+   descarta el anterior si llega otro de la misma cámara antes de procesarlo:
+   0-1 cada 30 s) → `TiendasProcess.process_frame`.
+4. Pipeline: RF-DETR → ByteTrack por cámara → identidad
+   (`face_reidentifier.py`) → entradas/salidas del ROI → demografía → base.
+5. El modo **`Anaqueles`** (`anaqueles.py`) hereda todo lo de `Tiendas` y
+   añade visitas y agarres por área, y **productos dentro de cada área**
+   (desde `a8ee806`). **Para cambiar de modo en el cliente hay que detener la
+   conexión** (`custom_status_bar.py:109`, `:174`, se libera en `:215`).
+
+### El ciclo del cliente (medido y leído el 28-29 sep) — clave del rendimiento
+
+**Dos rutas de captura:**
+
+| | **Captura de ventana** (iVMS, el reproductor… lo que se usa HOY) | **DVR / stream** (panel Dispositivos) |
+|---|---|---|
+| Quién captura | proceso aparte `capture_worker.py`, **sin pausa** entre capturas (`:240`) | hilo `rtsp_worker.py` |
+| Cómo | `PrintWindow`: modo rápido ~11 ms o modo para apps con GPU ~33 ms (`:219-224`) | stream nativo |
+| Tamaño | ancho máx. **1600** px (`CAPTURE_MAX_WIDTH`, `:35-38`); la ventana de iVMS mide 1456×868 | **sin límite** (resolución nativa) |
+| JPEG | calidad **70** (`:297`) | calidad **80** (`render_box.py:593`) |
+| Hora de captura | viaja en cada frame: `header.timestamp` (`:299-303`), reloj de Windows, hora local sin zona | no |
+
+**El ciclo (una cámara), paso a paso:**
+
+1. El proceso de captura entrega JPEG por un tubo, ~**20 por segundo** (dato
+   del usuario con la IA apagada).
+2. El recuadro lee el tubo, **se queda con el último y tira los intermedios**
+   (`render_box_captura.py:506-511`). Si `can_send_next_frame` es True, lo
+   manda (~**300 KB**) y lo pone a False (`:574-579`).
+3. El servidor lo procesa: **63-80 ms** (telemetría). **Es lo único que hace
+   trabajar a la GPU.**
+4. Vuelve la respuesta (**modo directo**: solo detecciones, sin imagen,
+   `render_box.py:286`) y el cliente pone `can_send_next_frame = True`
+   (`render_box.py:1845`) **sin mandar nada**.
+5. **Espera a la SIGUIENTE captura** (las que llegaron mientras esperaba ya se
+   tiraron). A 20 capturas/s son 0-50 ms, ~25 de media. Vuelve al paso 2.
+
+**Contadores que ve el usuario en el recuadro:** con la IA apagada, «FPS: N»
+cuenta **lecturas del tubo con al menos un frame** (si llegan dos juntos
+cuenta uno: puede quedarse corto; `render_box_captura.py:517-527`). Con la IA
+encendida se sustituye por «IA: N FPS» = **respuestas del servidor**
+(`render_box.py:1837`). Nunca se ven las dos a la vez.
 
 ### Mecanismos que conviene saber
 
-- **Estado por cámara:** `_push_state`/`_pop_state` (`tiendas.py:1109`,
-  `:1127`) cuelgan el estado **solo mientras dura un frame**. Leer
-  `proc._zone_state`, `_total_entries`, etc. desde fuera da el estado vacío.
-- **Perfiles por cámara:** `config/camera_profiles/<camera_id>.json`.
-  **Desde el 21-sep ya no se busca por nombre exacto**: `_resolver_perfil`
-  (`demographics.py:100`) prueba el id completo y luego el id sin el sufijo de
-  instalación. El nombre del fichero se **sanitiza a `[alnum_-]` y se trunca a
-  64** (`_ruta_perfil`, `demographics.py:91`): el punto de `.net` desaparece y
-  los ids largos se cortan. **No lo deduzcas a ojo, calcúlalo.**
-- **Identidad multicámara:** la galería facial es **una sola compartida** entre
-  las cámaras de una conexión. `camera_track_namespace`
-  (`face_reidentifier.py:863`) da un offset por cámara (100000, +100M…) para
-  que los `track_id` locales de ByteTrack no colisionen. **La cara crea
-  identidades (umbral 0,35); el cuerpo solo re-enlaza; sin cara queda `prov:`.**
-- **Un procesador por cámara**, con su propio tracking y contadores, pero
-  comparten conexión, detector y memoria de caras. Los frames se procesan
-  **por turnos**: los FPS se reparten.
-- **Géneros:** `demographics.py:176` define `_GENDER_LIST = ['Hombre','Mujer']`.
+- **Estado por cámara:** `_push_state`/`_pop_state` cuelgan el estado solo
+  durante un fotograma. Leerlo desde fuera da el estado vacío.
+- **Un procesador por cámara y por conexión**, compartiendo detector, GPU y
+  galería de caras.
+- **Identidad:** la cara crea identidades (umbral 0,35); el cuerpo solo
+  re-enlaza; sin cara queda `prov:<track>`. La galería **olvida a los 30 min**.
+- **Los `track_id` se reinician en cada arranque.** No cruces datos por track.
+- **La ficha de cada persona** (`server/output/captures/persons/<stem>.json`)
+  se cierra con lo primero que llegue; lo que falte se espera 5 min
+  (`tienda_clasificaciones.py`, desde `0ab287c`).
+- **Dos vocabularios de género:** `'Hombre'/'Mujer'` (demografía) y
+  `'Hombres'/'Mujeres'` (solo para pintar). No los mezcles (`f7af573`).
+
+### Anaqueles: lo que hay que saber antes de tocarlo (28-29 sep)
+
+- **Productos** (`a8ee806`): cuadriláteros violetas dentro de un área, con
+  nombre (menú **Área ▾ → «Productos del anaquel»**). El servidor reparte
+  cada agarre confirmado al producto bajo la **muñeca**; lo que no cae en
+  ninguno va a `agarres_sin_producto`. Identidad = **posición** dentro del
+  área (por eso solo se quita el último). API:
+  `/api/anaqueles/<cam>/resumen` → `productos` por área y `ranking_productos`.
+- **La muñeca NO es la mano**: al estirarse hacia una balda alta queda
+  **~70 px por debajo y al lado de los dedos**. Con productos estrechos y
+  vecinos, **el producto asignado cambia de una pasada a otra** (el mismo
+  agarre salió «coffemate», «Nescafe» y «sin producto» en pasadas distintas).
+  Mejora pendiente: estimar la mano prolongando codo → muñeca (la pose ya da
+  el codo, keypoints 7 y 8).
+- **La pose (ViTPose, 17 puntos) es la ÚNICA forma de ver la mano** (no hay
+  modelo de manos; MediaPipe vetado). Cuesta **~21-28 ms por persona** en la
+  3090 Ti. **La muñeca no tiene tracker**: se recalcula en cada frame y es
+  «la izquierda/derecha de esa persona» (keypoints 9/10). En el vídeo no se
+  vio intercambio izq/der.
+- **Por defecto, la pose solo se calcula a quien está «en compuerta y
+  quieto»** (`anaqueles.py`, en `_medir`). Con una balda **por encima de la
+  cabeza**, con el brazo abajo la caja de la persona no pisa el área
+  (compuerta cerrada) y al subirlo el cuerpo cuenta como «en movimiento»: **la
+  máquina dejaba de mirar justo cuando entraba la mano**. En el vídeo vio la
+  muñeca a −34 px y 2 s después a +92: se perdió la entrada entera.
+- **Desde el 29-sep, `anaqueles_config.yaml` enciende como NORMA GENERAL**
+  `pose_cercania: true` (mirar también a quien está cerca del área, aunque se
+  mueva o no pise la compuerta) y `agarre_amplitud_desde: extremo` (medir el
+  recorrido desde el punto más alejado en que se vio la mano fuera). **Los
+  valores anteriores están comentados al lado** (`false` y `ultimo`) para
+  volver atrás. El defecto del CÓDIGO sigue apagado. **Aún no medido en las
+  cámaras en vivo.**
+- **Probadas y QUITADAS el 29-sep** (documentado en `anaqueles.py`, junto a
+  `_DEFECTOS`): `agarre_quietud='antes_de_entrar'` y `pose_en_movimiento`.
+  No cambiaron ni un conteo en el vídeo. No las vuelvas a añadir sin datos.
+- **Configuración de Anaqueles = tres capas**: `_DEFECTOS` del código →
+  valores globales del YAML → bloque `camaras.<camera_id>` del YAML. **Solo
+  se leen claves declaradas en `_DEFECTOS`** (una desconocida se ignora sin
+  avisar). **Evita el bloque por cámara**: los nombres cambian y, si no
+  coincide, se ignora en silencio. La config se lee cuando se crea el medidor
+  de esa cámara (primer frame de cada conexión): un cambio en el YAML vale al
+  reconectar el cliente o reiniciar el servidor.
+- **El gesto se guarda por (área, identidad de la persona)**: si la cara se
+  reconoce A MITAD del gesto (`prov:` → UUID), el gesto se reinicia. En el
+  vídeo pasó (a +33,5 s) sin ser la causa; puede costar agarres. Medir en la
+  cámara real antes de tocarlo (solución: pasar el estado al nombre nuevo).
+- **El calor del área solo se suma con la muñeca dentro a fondo y la persona
+  quieta.** El mapa de calor horario del pasillo se guarda **cuando llega el
+  primer frame de la hora siguiente** (`heatmap.py:530-545`).
+- **Si un recuadro acaba justo en el borde de la balda**, con la regla de
+  siempre la muñeca apenas entra: un recuadro que baja ~85 px por debajo del
+  borde sí contaba. Con `pose_cercania` ya no hace falta.
+
+### Dónde están los datos
+
+| Qué | Dónde |
+|---|---|
+| Log | `server/logs/server.log` (rota a 5 MB, 3 copias) |
+| Base | `server/output/tienda.db`: `tienda_visitas`, `tienda_eventos` (`entrada`/`salida`, `ts` en epoch), `tienda_capturas` (caché perezosa), `tienda_clasificaciones` (con `solo_cuerpo`) |
+| Fichas y fotos | `output/captures/persons/` **relativo al directorio de arranque** |
+| Eventos por persona | `output/analytics_log_<camera_id>.jsonl`: `person_detected` y `demographic_classified` (**incluye provisionales**) |
+| Anaqueles | `server/output/anaqueles/<camera_id>/<AAAA-MM-DD>.json` (**totales por día** UTC, con `productos`) y `fotos_ref/<área>.jpg` (recorte exacto del área cuando estaba vacía) |
+| Heatmaps | `output/heatmap/<camera_id>.png` y `history/<cámara>/<AAAA-MM-DD_HH>.{png,json}` |
+| **Informes del usuario** | **`informes/`** (local, **fuera de git**): `informe_2026-09-25.md`, `informe_2026-09-28.md`, `heatmaps_2026-09-28/` y su `.zip` |
+| Config del cliente | `%LOCALAPPDATA%\tienda_view\tienda_view\config.json`, **cifrada a propósito**. Al cargarla imprime «Archivo de configuración **creado**» aunque la haya **cargado** (`settings_model.py:114`) |
+
+APIs útiles: `/health`, `/api/v1/tienda/{resumen,serie,pasillos,demografia,
+clasificaciones,capturas}`, `/api/anaqueles/<cámara>/resumen`,
+`/api/anaqueles/<cámara>/heatmap/<área>/imagen?fecha=AAAA-MM-DD`,
+`/dashboard/img/heatmap/<cámara>.png`, `/api/v1/heatmaps`.
 
 ---
 
-## Qué se resolvió
+## 4. Qué se resolvió
 
-### Sesiones 16-18 sep — PR `fix/eliminar_vigilantes_amazonas` (`ae11664` + `e01ecde`)
-
-**Imagen congelada en modo IA.** Dos fallos encadenados:
-`deteccion_compartida.py` importaba `vigilante_amazonas` (ausente aquí) → el
-detector nunca se construía; y los pesos de `models/` eran punteros de Git LFS
-(`git lfs install` + `git lfs pull`). Lo volvía silencioso que `tiendas.py`
-atrapaba el error y `app.py` respondía `success` sin `detections`.
-
-Arreglado con `ajustes_rfdetr()`, `_pesos_vivos()`, el nuevo
-`src/app/fallo_imagen_IA_pipeline.py` y 10 tests.
-
-### Sesión 21-22 sep — rama `claude/pensive-galileo-aymjr3`
-
-**`2644a68` — Caducar la galería facial por TTL y dejarla en RAM.**
-
-La galería venía del stand, donde interesaba recordar mucho tiempo:
-`REID_RESET_POLICY` era `"never"` y el fichero solo crecía. Medido en este
-repo: `_best_in_gallery` recorre toda la galería en un bucle de Python, y pasa
-de **3,6 ms con 100 personas a 67,6 ms con 2 000 y 170,6 ms con 5 000** —
-contra un presupuesto de 66 ms por frame a 15 fps, y pagándose **una vez por
-cada cara del frame**. Con ~200 personas/hora se llega a ~2 400 en un día.
-
-- `REID_RESET_POLICY` admite `"ttl"` y **es el defecto**; `REID_TTL_S = 1800`.
-  Por entorno: `ELDE_REID_RESET_POLICY`, `ELDE_REID_TTL_S`.
-- `_caducar_locked` purga por `last_seen` (no `first_seen`: quien sigue en el
-  pasillo no caduca), borra el jpg y limpia `_track_to_person`.
-- Con TTL **la galería no toca disco** y no se registra `atexit`.
-- Cierra un fallo reproducido: `_build_processor` corre **una vez por conexión
-  websocket**, así que dos clientes tenían dos galerías escribiendo el mismo
-  pickle; `_sync_external_deletions` solo propaga borrados, de modo que cada
-  guardado sobrescribía a la otra y **al apagar el fichero quedaba VACÍO**.
-- 18 pruebas nuevas (`server/tests/test_reid_ttl.py`), que incluyen la primera
-  cobertura del namespace de `track_id` por cámara.
-
-**Confirmado en producción:** `REID TTL: caducaron 2 personas (ttl=60s)`.
-
-**`5ab054e` — Resucitar los perfiles de cámara huérfanos.**
-
-`win-iVMS-4200.json` y `win-iVMS-4200-c2.json` se calibraron el 7-8 de agosto
-con mediciones reales. El 9-sep `device_id()` estrenó el sufijo de instalación
-(`-i<marca>`) y **dejaron de cargarse**: el cliente pedía
-`win-iVMS-4200-i58bf7b` y el fichero se llamaba `win-iVMS-4200.json`.
-
-`_resolver_perfil` reintenta sin el sufijo. 10 pruebas nuevas
-(`server/tests/test_perfil_camara_instalacion.py`).
-
-**Confirmado en producción (22-sep 14:16):**
-`Perfil demografico camara win-iVMS-4200-c2-i58bf7b aplicado
-(win-iVMS-4200-c2.json)` con 13 claves. Y la telemetría pasó a decir
-`umbral=16.0` donde antes decía `25.0`.
+| Commit | Rama | Qué |
+|---|---|---|
+| `ae11664`, `e01ecde` | `fix/eliminar_vigilantes_amazonas` | imagen congelada en modo IA (detector importaba `vigilante_amazonas`; pesos como punteros LFS) |
+| `2644a68` | `claude/pensive-galileo-aymjr3` | galería facial con **TTL de 30 min** y en RAM |
+| `5ab054e` | ídem | perfiles de cámara huérfanos desde el sufijo `-i<instalación>` |
+| `eb10ef5`, `2dd7267` | `fix/gender` | avisos de log |
+| `f7af573` | ídem | **el voto de género nunca contaba** |
+| `576e53a` | ídem | bandera `rama_corporal_activa` y MiVOLO v2 |
+| `288be55` | `feature/anaquel` | pintar en el recuadro las muñecas de Anaqueles (menú Vista) |
+| `0ab287c` | ídem | esperar identidad/género tardíos en la ficha; tabla `tienda_clasificaciones` |
+| `a8ee806` | ídem | **productos dentro de los anaqueles**: dibujo en el cliente, reparto de agarres, API. Probado en vivo el 28-sep |
+| `b303013` | ídem | **telemetría de fps por cámara** en el log (recibidos, procesados, tiempo de proceso, KB/s) |
+| `c690a86` | ídem | **agarres en baldas altas**: `pose_cercania` + `extremo` (encendidas en el YAML), diagnóstico (`ELDE_ANAQUELES_DIAG`) y grabador (`ELDE_ANAQUELES_GRABAR`); dos opciones probadas y quitadas |
 
 ---
 
-### Sesión 23-sep — rama `fix/gender`
+## 5. Lo medido
 
-**`f7af573` — Conectar el voto de género, que nunca contaba un voto.**
+### 5.1 Cámara real 3, del 24-sep 17:26 al 25-sep 17:04 (hora de Venezuela)
 
-`_maybe_update_demographics` agrega el género por voto ponderado, pero el
-filtro pedía `('Hombres','Mujeres','Ninos')` —el vocabulario de
-`result['category']`, que sirve para PINTAR— y `demographics.py` manda
-`'Hombre'/'Mujer'`. La condición no se cumplía nunca: `votos_genero` quedaba
-vacío y la consolidación por mayoría **no llegaba a ejecutarse**.
+Resumen del informe `informes/informe_2026-09-25.md` (local). Modo `Anaqueles`.
+Tienda cerrada de 21h a 06h; **cámara sin señal de 13:55 a 15:05 del 25**.
 
-El efecto no era solo perder la mayoría: sin votos el género quedaba
-**CONGELADO en la primera lectura** (la peor: de lejos y de perfil), y encima
-se propagaba, porque `demographics.py:1371` impone a propósito el valor
-guardado al reconocer a alguien. **La edad no tenía ese filtro y por eso sí se
-corregía sola.**
-
-Se cambió el vocabulario del FILTRO, no la llamada: pasar `category` habría
-metido un tercer valor en un campo de dos que leen **~30 sitios** (dashboard,
-informe PDF, la columna `genero` de `tienda_visitas`) y habría mezclado
-'Hombre' con 'Hombres' en la base. Va en la constante `_GENEROS_VOTABLES`
-porque fue la duplicación la que permitió que se desincronizara. 11 pruebas.
-
-**`576e53a` — Contar MiVOLO v2 en la bandera de la rama corporal.**
-
-`rama_corporal_activa` miraba solo `_par` y el MiVOLO ONNX viejo, no
-`_estimador_cuerpo` (MiVOLO v2), que desde el Hito 4 es **la ruta principal** y
-la que `_infer_body_only` prueba PRIMERO. 4 pruebas, una de ellas fija ese
-ORDEN sobre el código: si alguien lo invirtiera, generar el PAR volvería a
-tener sentido y la recomendación de no hacerlo dejaría de ser cierta.
-
-**Confirmado en producción (23-sep):** `REID TTL: caducaron 1 personas
-(ttl=1800s)` — con el TTL REAL de 30 min, no con los 60 s de prueba. Eso cierra
-el pendiente «validar el TTL con los 30 minutos reales».
-
----
-
-### Sesión 23-sep (tarde) — rama `feature/anaquel`
-
-**`288be55` — Pintar en el recuadro las muñecas que ve el modo Anaqueles.**
-
-Calibrar un área era adivinar: desde el cliente no había forma de ver DÓNDE
-cree el servidor que está la mano. Ahora `metadata['anaqueles']` lleva, por
-fotograma, cada muñeca con su profundidad respecto al área, y el recuadro las
-pinta (verde = la cuenta dentro, ámbar = no llega). Interruptor en el menú
-**Vista**, nace apagado. Va SIN throttle (el resto del bloque va a 2/10/30 s)
-y **caduca a los 0,7 s**: un punto viejo clavado miente más que un hueco.
-16 pruebas. No toca el contrato de entrada.
-
-### Lo medido sobre ANAQUELES con vídeo real (23-sep)
-
-Probado con una foto y un vídeo de 2,5 s de un pasillo de cereales:
-
-- **RF-DETR detecta a la persona con conf 0,96** y **ViTPose encuentra las dos
-  muñecas** (conf 0,67-0,91). Las piezas funcionan.
-- **Dónde dibujes el área lo decide TODO.** Con el área ceñida a los
-  productos, la compuerta **no abre**: solape 12.480 px² de los 24.044 que
-  pide. No cuenta ni visitas ni agarres. Bajándola por debajo de la balda sí
-  abre (32.112 px²). **Dibuja las áreas generosas.**
-- **El agarre exige ver la mano ENTRAR.** En el vídeo la mano ya estaba en el
-  estante: 25 fotogramas seguidos con la muñeca dentro, `fuera=0`,
-  `armado=False` → 0 agarres. Es correcto por diseño. Invertir el vídeo
-  tampoco cuenta.
-- La lógica de conteo pasa 5/5 casos sintéticos (dwell, quietud, cooldown,
-  dos personas a la vez).
-
-**TRAMPA: `pose_disponible: false` NO significa que falte la pose.** Es
-`self._modelo is not None` (`pose_motor.py:95`) y el modelo es PEREZOSO: vale
-`False` hasta que alguien entra en compuerta por primera vez. Comprobado
-forzando la carga: pasa a `True` y devuelve los 17 keypoints. **Y el panel del
-cliente enseña un aviso alarmante basándose en esa bandera**
-(`anaqueles_panel.py:249`). Es el mismo tipo de trampa que el error nº 6.
-
-**Los `descartes` no se ven por ningún lado.** El medidor acumula POR QUÉ no
-contó (`agarre_amplitud`, `visita_movimiento`…), pero el panel no los muestra
-(`anaqueles_panel.py:184` solo lee `suspendido`, `sin_personas_s` y
-`pose_disponible`) y la API no los expone. **Sin eso, ajustar umbrales es a
-ciegas.** Exponerlos es lo primero que habría que hacer en Anaqueles.
-
-**Para cambiar a modo `Anaqueles`** hay que **detener la conexión** primero:
-el desplegable del pie está deshabilitado mientras hay conexión
-(`custom_status_bar.py:109` y `:174`; se libera en `:215`). No es obvio y
-costó una hora.
-
-### Sesión 24-sep — RENDIMIENTO: dónde está el cuello (MEDIDO)
-
-**El «2-3 fps efectivos» que repiten los comentarios del código NUNCA estuvo
-medido.** El servidor no tiene telemetría de tiempos. Esto sí está medido.
-
-**Banco aislado** (GPU real, frame real de 1280×790 rescatado de
-`output/heatmap/`, que contiene la escena del pasillo):
-
-| Escena | Por frame | fps | Detección | Demografía |
-|---|---:|---:|---:|---:|
-| 1 persona | 38,4 ms | **26,0** | 32,4 ms (84 %) | 3,0 ms |
-| 4 personas | 60,0 ms | 16,7 | 34,2 ms | **27,2 ms** |
-
-- **La detección cuesta lo mismo haya 0 o 6 personas** (~32-36 ms). Es el
-  coste fijo y domina.
-- **La demografía escala con la gente**: ×10 de 1 a 4 personas.
-- **Las cámaras no encarecen el frame: REPARTEN los fps.**
-  1 cámara → 22,3 fps · 2 → 12,6 · **4 → 4,4 por cámara**. De ahí salía el
-  folclore de los 2-3 fps: el número era real, la explicación no.
-
-**En vivo, con el cliente conectado y UNA cámara** (modo Anaqueles, 1.129
-fotogramas en 176 s):
-
-```
-FPS REAL DEL SISTEMA:  6,4 fps   (ciclo de 156 ms)
-GPU 0: 36,8 % de uso medio, maximo 64 %, NUNCA >90 %
-GPU 1 y 2: 0 % — paradas
-```
-
-**EL CUELLO NO ES LA GPU NI EL MODELO. Es el ciclo secuencial
-cliente↔servidor.** El cliente manda un fotograma y **se queda parado** hasta
-recibir la respuesta (`can_send_next_frame`, `render_box.py:633` y `:1753`).
-Mientras el servidor calcula, el cliente espera; mientras el cliente captura,
-comprime y pinta, el servidor espera. **Nunca trabajan a la vez**, y por eso
-la GPU está al 37 %.
-
-De los 156 ms del ciclo, ~57 son cálculo y **~99 son espera**.
-
-**DESCARTADAS por la medición** (no las propongas): fp16, bajar la resolución
-del detector y repartir cámaras entre las 3 GPUs. Las tres aceleran una GPU
-que está al 37 % — no darían ni un fotograma más.
-
-**LA PALANCA QUE QUEDA: dos fotogramas en vuelo en el cliente.** Que mientras
-el servidor procesa el N, el cliente ya capture y comprima el N+1. Estimado
-(no medido): acercarse al doble de fps, GPU al 70-80 %. La cola del servidor
-ya está preparada — se queda solo con el fotograma más reciente por cámara
-(`ws_drenaje.py`), y **nunca ha descartado uno**: `descartados = 0` en todo el
-log.
-
-Un comentario que SÍ acertaba: `capture_worker.py:27` decía «a 1280 px ~130
-ms/frame». Medimos 116-156. Ese número era bueno.
-
-## Lo que se aprendió midiendo
-
-Ordenado de menos a más fiable: primero lo de muestras cortas (21-22 sep),
-después **lo medido sobre producción el 23-sep, que es lo que manda**.
-
-### La telemetría `CALIDAD FACIAL` es la métrica buena
-
-```
-CALIDAD FACIAL | aceptadas=28 blur_min=37.7 (umbral=25.0) cero_borrosas=True |
-rechazos={'bbox_pequeno': 59, 'ensemble_tta': 43, 'body_sin_modelo': 21,
-          'sin_cara': 20, 'pose': 13, 'calidad': 6, 'body_conf_baja': 1}
-```
-
-Cómo leerla, con las trampas:
-
-- **Es acumulada desde que arrancó el procesador**, no instantánea. Para
-  comparar sesiones, usa **la última línea de cada una**.
-- **Es por cámara** (cada `cam_proc` tiene su clasificador) pero **la línea no
-  dice qué cámara es**. Con varios recuadros abiertos no sabrás cuál es cuál.
-  `blur_min` sirve de huella: valores parecidos = misma cámara.
-- `umbral=` refleja el perfil aplicado. **Si dice 16.0, el perfil está
-  cargado; si dice 25.0, no.** Es la comprobación más rápida.
-- Comando: `grep "CALIDAD FACIAL" server/logs/server.log | tail -3`
-
-### El cuello de botella NO es la nitidez, es el tamaño de la cara
-
-`DEMO_MIN_BLUR_VAR` se mide sobre la cara **ya alineada a 112×112**
-(`_align_face_arcface` → `warpAffine`), no sobre el píxel nativo. Reproducido
-con la foto real del pasillo: la misma cara escalada da
-
-```
-cara nativa:  60px → blur 206 |  35px → 34,6 |  28px → 16,1
-              25px →  10,2    |  21px →  6,6 |  18px →  3,8
-```
-
-Los valores del log (4,5 – 16,5 en el vídeo de prueba) encajan clavados con
-caras de 18-28 px. **El umbral de 25 equivale a exigir ~32-35 px de cara
-nativa.** No mide nitidez: mide tamaño disfrazado.
-
-Y por debajo hay un muro que ningún perfil salva — `DEMO_ADAPTIVE_BRACKETS`
-(`config.py`): **`<25 px nativos se rechaza directo`**.
-
-La foto real del pasillo da **blur 2 915 en la cara nativa** y ~310 tras
-alinear: la cámara real está bien. El problema es la distancia, no la imagen.
-
-### LO QUE MANDA: 14 h de producción (23-sep)
-
-Log de `00:10` a `14:28`, 13.082 líneas, 18.800 intentos sobre dos cámaras.
-**Tasa de aceptación: 8 %.** Esto sustituye a cualquier reparto sacado de
-muestras de minutos.
-
-| Motivo | Casos | % |
+| | Cantidad | % |
 |---|---:|---:|
-| **tamaño** (`bbox_pequeno` + `body_bbox_pequeno`) | **6.523** | **37,7 %** |
-| `sin_cara` | 3.357 | 19,4 % |
-| `pose` | 2.355 | 13,6 % |
-| `body_sin_modelo` (NO es «falta el modelo») | 1.904 | 11,0 % |
-| `calidad` | 1.339 | 7,7 % |
-| `ensemble_tta` | 935 | 5,4 % |
-| `body_conf_baja` | 872 | 5,0 % |
+| **Personas capturadas** (una ficha por persona) | **936** | 100 % |
+| **Identificadas** (cara reconocida) | 179 capturas, 167 personas | **19,1 %** |
+| **Clasificadas** (género y edad) | 90 (60 H, 30 M) | **9,6 %** |
 
-**Cuando falla la pose, SIEMPRE es giro horizontal:** perfil 3.161 + girada 970
-+ yaw 1.565 = 5.696, contra pitch 14 y roll 0. Arriba/abajo e inclinación no
-cuentan. `DEMO_DEBUG_REJECTIONS` está activo, así que el log guarda el motivo
-de cada cara: `grep -c 'RECHAZO eye_ratio' server/logs/server.log`.
+- Con identidad se clasifica al **28,5 %**; sin ella, al **5,2 %**.
+- **84 %** de las clasificaciones, **solo con el cuerpo** (MiVOLO v2).
+- **Por qué no se clasificó al resto (846):** `muestras_insuficientes`
+  **59,6 %**, `sin_rostro` 35,3 %, `calidad` 2,8 %.
+- **Anaqueles:** Anaquel 2 (Nescafé/Colcafé) 88 visitas y 5 agarres; Anaquel 1
+  (latas altas) 11 visitas y **8 agarres** (proporción sospechosa: ¿personal
+  reponiendo?).
+- **Permanencia en el ROI:** estancia mediana 3,7 s; 31 % ≤ 2 s. Por persona,
+  mediana 11 s.
+- **Horas pico:** 09h y 11h. El mapa general: más actividad a las 16h.
+- **Personal en las métricas:** `3edc2281` 79 entradas y 22 min 40 s (15 % de
+  toda la permanencia); 9 identidades con más de 20 entradas el día 25.
 
-Ojo al encadenar números: una cara rechazada por perfil **cae luego a la rama
-corporal** y solo si esa también falla cuenta como `sin_cara`
-(`demographics.py:1180-1186`). No sumes pose + sin_cara.
+### 5.2 Producción, 14 h del 23-sep (dos cámaras)
 
-### LA CAUSA Nº 1: el listón, no la imagen (23-sep)
+18.800 intentos, **aceptación 8 %**. Rechazos: tamaño 37,7 %, sin cara
+19,4 %, pose 13,6 % (**siempre giro horizontal**), `body_sin_modelo` 11 %
+(**no** significa «falta el modelo»), calidad 7,7 %.
 
-Cada captura guarda por qué no se pudo estimar el perfil. Sobre 1.343 fichas:
+**Conclusión común a 5.1 y 5.2: la causa n.º 1 de no clasificar es el listón
+para decidir, no la imagen.** `DEMO_MIN_SAMPLES=5`, `DEMO_MIN_CONFIDENCE=0.85`,
+`DEMO_MIN_MARGIN=0.35`, `DEMO_COMMIT_AGREE_RATIO=0.90` (`config.py:96-192`).
+**Nadie lo ha aflojado ni medido.** El umbral de nitidez mide en realidad
+**tamaño** (25 ≈ exigir ~32-35 px de cara nativa).
 
-| Motivo | Casos | % |
-|---|---:|---:|
-| **`muestras_insuficientes`** | **718** | **53 %** |
-| `sin_rostro` | 489 | 36 % |
-| `calidad_insuficiente` | 67 | 5 % |
-| `rostro_muy_pequeno` | 52 | 4 % |
+**Identidad entre cámaras: funciona** (47 personas enlazadas el 23-sep); por
+eso el doble conteo es medible (hallazgos 1 y 13).
 
-`muestras_insuficientes` = se le vio la cara, se tomaron muestras y **nunca
-llegaron al listón**: `DEMO_MIN_SAMPLES=5`, `DEMO_MIN_CONFIDENCE=0.85`,
-`DEMO_MIN_MARGIN=0.35`, `DEMO_COMMIT_AGREE_RATIO=0.90` (`config.py`, en modo
-«precisión máxima»; el perfil de cámara tiene PROHIBIDO tocarlos).
+### 5.3 Rendimiento del SERVIDOR (24-sep, banco aislado)
 
-**Es la palanca más rentable del proyecto: la causa mayoritaria y la única que
-se mueve cambiando números.** No se ha probado todavía.
+38 ms por frame con 1 persona (84 % detección, fija); la demografía escala
+(3 ms con 1 persona, 27 ms con 4). **Las cámaras reparten los fps.** fp16,
+bajar la resolución del detector y repartir cámaras entre GPUs: **descartados
+por la medición** (aceleran una GPU que no es el cuello).
 
-### EL FALLO MÁS GORDO: el panel y la base no exigen lo mismo (23-sep)
+### 5.4 Rendimiento DEL CICLO (28-29 sep, telemetría nueva)
 
-En `tiendas_fotos.py:552-566`, la alerta al cliente se emite **sin condición**
-y el guardado en base solo **`if _pid_demo`** (el `person_uuid`). Y
-`person_uuid` solo se rellena por la vía de re-identificación facial
-(`demographics.py:911` y `:1378`).
+**En vivo, vídeo, una cámara, `Anaqueles` con `pose_cercania`:**
 
-Resultado medido sobre 1.474 capturas:
+| Prueba | fps que recibe el servidor | Proceso en servidor | Nota |
+|---|---:|---:|---|
+| GPU 0, sin `pose_cercania` (28-sep 17:20 UTC) | 5,5 | — | carga ajena baja |
+| GPU 0, con `pose_cercania` (19:57) | 4,0 | — | **carga ajena ~42 %** en esa GPU |
+| **GPU 1, con `pose_cercania`, 40 min (21:11-21:51)** | **mediana 6,1** (2,8-7,0) | **mediana 63 ms**, p90 ~114 | carga ajena media |
+| Tramo del agarre, 1456 px (29-sep 14:31) | ~5,0 | 66-84 ms | ~300 KB/frame, 1,2-1,8 MB/s |
+| Tramo del agarre, `CAPTURE_MAX_WIDTH=960` (14:41) | ~6,5 | 36-53 ms | ~145 KB/frame, 0,9-1,0 MB/s |
 
-```
-con género .... 131      →   con identidad ...  12
-                             SIN identidad ... 119   ← se pierden
-```
+**Lo que se concluye (y con qué seguridad):**
 
-**Se pierde el 91 % de lo clasificado.** El panel enseña 131 y los informes
-salen de 12. **Por qué falta la identidad NO se ha medido**: el campo
-`origen_demografia` sale vacío en las 131 fichas.
+1. **La GPU no es el cuello** (medido): de un ciclo de ~164-200 ms el servidor
+   trabaja 63-80. Podría con ~12-15 fps por cámara.
+2. **La conexión no está llena** (medido): con fotos a la mitad, los KB/s
+   bajaron un 40 % y los fps solo subieron un 30 %. Si la subida fuera el
+   techo, los KB/s se habrían mantenido y los fps casi duplicado.
+3. **Reducir a 960 px NO compensa**: +30 % fps a cambio de más caras perdidas
+   (rechazos de cara 97 → 139; «sin rostro» 2 → 7 de 12 fichas; muestra
+   pequeña, orientativo).
+4. **Sin medir: el reparto de los ~100-120 ms que el ciclo pasa fuera del
+   servidor.** Estimado: ~25 ms de media esperando la siguiente captura
+   (paso 5 del ciclo, sección 3) + ~60-100 ms de subida, latencia del túnel,
+   respuesta y manejo en el cliente. **La prueba A/B cambiaba cuatro cosas a
+   la vez** (tamaño a transmitir, proceso del servidor, compresión en el
+   cliente y ritmo de captura): no sirve para repartir esos ms.
+5. **El `proceso` de la telemetría no incluye** recibir/desempaquetar el
+   mensaje ni enviar la respuesta.
 
-Decisión pendiente del usuario: `tienda_visitas` exige `persistent_id`, así que
-guardar a los 119 obliga a elegir entre inventarles uno (y perder el conteo
-único) o guardarlos aparte como «visita sin identificar».
+**Siguiente medida buena:** usar `header.timestamp` (hora de captura que el
+cliente ya manda) para medir en el servidor cuánto tarda cada foto en llegar,
+y la telemetría del cliente (sección 9).
 
-### Identidad entre cámaras: funciona a escala (23-sep)
+### 5.5 Anaqueles con el vídeo de referencia (28-sep)
 
-| Vista por | Personas |
+Todo sobre la grabación de 482 frames (92 s) del tramo de la clienta de los
+Coffee-mate, reproducida fuera de línea con la pose real (la reproducción da
+**los mismos descartes que en vivo**):
+
+| Regla | Agarres |
 |---|---:|
-| 1 cámara | 245 |
-| 2 cámaras | 43 |
-| 3 cámaras | 4 |
+| La de siempre (y también la del código anterior a los productos, `0ab287c`) | 0 |
+| Solo `pose_cercania` | 1 |
+| **`pose_cercania` + `extremo`** | **2 (reales, revisados en imagen)** |
+| Bajar `agarre_amplitud_min` a 0,20 | 1, **por suerte**: dependía de UNA muestra a 2 px del borde; moviendo el área 8 px, 0 |
+| Recuadro alargado hacia el torso (y 600-700) | cuenta, **pero también cuenta a la clienta tocándose el pelo** (falso) |
 
-**47 personas enlazadas entre cámaras**, no 1 como el 22-sep. La parte difícil
-funciona. Y por eso mismo **el doble conteo ya está medido**: sumar por cámara
-da **314**, unir identidades da **261** → **53 personas de más, un 20 %**.
-Eso cierra los hallazgos 1 y 13, que llevaban desde el 18-sep sin medirse.
+**El commit de los productos NO rompió el agarre**: `0ab287c`, `a8ee806` y la
+copia de trabajo dan idéntico resultado en la grabación.
 
-**Ojo con `tienda_capturas`:** es una **caché perezosa** que solo se llena al
-abrir el panel de capturas. Si sale vacía no significa que no haya capturas.
-La fuente de verdad son los sidecars JSON en disco.
+En vivo, con `pose_cercania` + `extremo`: 2 agarres en ese tramo, **las tres
+veces que se reprodujo** (28-sep 19:57, 21:47 y 29-sep 14:32). Coste: la pose
+pasa de 40 a 337 cálculos en 482 frames; ~15-20 ms más por frame con alguien
+delante del estante.
 
-**Límite estructural:** para *registrar* hace falta cara semi-frontal
-(`REID_MAX_YAW_FOR_REGISTRATION = 20°`). En un pasillo la gente mira el
-producto.
+### 5.6 El vídeo como fuente, 28-sep 17:00-17:57 (Venezuela)
 
-## Hallazgos pendientes (18-sep, revisados el 23-sep)
+Resumen de `informes/informe_2026-09-28.md` (local). **Es la grabación, no la
+tienda**: 102 capturadas, 20/19 identificadas (19,6 %), 16 clasificadas
+(15,7 %; 15 H y 1 M; 75 % solo cuerpo), `muestras_insuficientes` 54,7 %;
+Anaquel 1: 1 visita y 2 agarres; estancia mediana 3,6 s.
 
-Antes de citar uno, **comprueba que el código sigue igual**. Los que llevan
-✅ se resolvieron; los demás siguen vivos con sus líneas actualizadas.
+### 5.7 Precisión: NO está medida
 
-1. **Persona en dos cámaras — MEDIDO el 23-sep, sigue sin arreglar.**
-   `tienda_almacen.demografia` (`:568`) suma por cámara en vez de unir. El
-   coste real: **314 frente a 261, 53 personas de más, 20 %**. Ningún test lo
-   cubre. Va de la mano del 13.
-2. **Jarvis:** `render_box.py` rehace la alerta sin `person_uuid` ni
-   `camera_name`, y `jarvis_forwarder.py` agrupa todas con `('obj','?:?')`.
-   Solo importa si usan Jarvis.
-3. **DVR por IP arrastrados:** `camera_id` `dvr-sin_nombre-<canal>`, igual en
-   equipos distintos. No afecta a las ventanas de iVMS.
-4. **Panel Anaqueles:** `anaqueles_panel.py:55-56` traduce `male/female` y le
-   llega `Hombre/Mujer`, así que el feed dice «Persona». *Verificado 22-sep.*
-5. **«Local: el del pie»:** ese selector ya no existe y
-   `selected_establishment` no se rellena (`jarvis_forwarder.py:230`). Sin
-   local elegido no se envía nada a Jarvis. *Verificado 22-sep.*
-6. **Errores que el cliente nunca ve:** `_send_error` responde sin `event` y
-   `socket_client.py` lo descarta. En la ruta por ventana no hay reintento.
-7. **`status: "error"`:** el cliente imprime el aviso en cada frame (~11/s) y
-   no repinta. Aplazado por el usuario.
-8. **Votos de género por persona:** `face_reidentifier.py:754` y `:816` solo
-   aceptan `'Hombres'/'Mujeres'/'Ninos'`, y `demographics.py:176` define
-   `['Hombre','Mujer']`. *El desajuste de literales sigue en el código
-   (verificado 22-sep); no se ha comprobado en ejecución qué valor llega.*
-9. **Menores:** `main.spec` pide `core.run_controller` (no existe);
-   `get_and_test.py` importa `models.dvr_storage` (está en `elde_core/dvr/`).
-10. **Aforo en vivo (deducido):** `api_tienda.py` lee el estado del procesador
-    fuera de un frame (ver «Estado por cámara»). Se espera 0 o parpadeo.
-11. ✅ **Perfiles de cámara huérfanos** — resuelto en `5ab054e` y confirmado en
-    producción.
-12. **Modo Stand** (el cliente de tienda no lo ofrece): `amazonas_stand.py` lee
-    `_demographics` después del pop. Se espera que no confirme degustaciones.
-
-### Hallazgos nuevos del 21-22 sep
-
-13. **`dashboard.py:244` — MEDIDO el 23-sep, sigue sin arreglar.** Sin
-    clientes conectados hace `visitantes = sum(...)` en vez de unir UUIDs. La
-    rama en vivo sí lo hace bien (`:228`, `:238`). Mismo 20 % del hallazgo 1.
-    La API `/api/v1/tienda` **sí lo hace bien** (`tienda_almacen.py:465`,
-    `COUNT(DISTINCT persistent_id)`): el que falla es el dashboard viejo.
-14. **`_best_in_gallery` es O(N) en Python puro** y `_cosine_similarity`
-    renormaliza vectores que ya vienen normalizados. Un producto matricial da
-    **250-300× más rápido**. Con el TTL ya no urge.
-15. ✅ **`ERROR` rojo en cada arranque** — resuelto en `eb10ef5`. Era: `estacionamiento_planificador` no existe
-    en este corte y `app.py:150` lo saca con `logger.exception` (traceback
-    completo), cuando `vigilante_amazonas` y `perimetral_nocturna` salen como
-    un `WARNING` de una línea. Cosmético, pero asusta.
-16. ✅ **`REID TTL: caducaron N` era `logger.debug`** — resuelto en `2dd7267`. Era:
-    (`face_reidentifier.py:449`): no se ve con nivel INFO.
-17. **`GET /vlm/model` ×16 en un segundo** desde el cliente. Polling agresivo.
-18. ❌ **OBSOLETO — NO generes el modelo PAR.** `_infer_body_only`
-    (`demographics.py:1803-1815`) prueba `_estimador_cuerpo` (MiVOLO v2)
-    PRIMERO y solo mira `_par` si aquel falta. MiVOLO v2 **está instalado y
-    activo** (`disponible: True, backend: pytorch, dispositivo: cuda`), así que
-    el PAR nunca se usaría. `setup_modelos.py` y el contador `body_sin_modelo`
-    siguen diciendo lo contrario: **están desactualizados, no les hagas caso**.
-
-### Hallazgos nuevos del 23-sep
-
-19. **El panel y la base no exigen lo mismo → se pierde el 91 %.** Ver arriba,
-    «EL FALLO MÁS GORDO». Es el de mayor impacto del proyecto.
-20. **Las capturas se escriben en una ruta y se leen en otra.**
-    `AnalyticsConfig.CAPTURE_DIR` es RELATIVA: quien escribe
-    (`tiendas_fotos.py:126`) la usa tal cual, contra el directorio de trabajo;
-    quien lee (`tienda_capturas.py:73-78`) la ancla a `server/`. Como el
-    arranque **no hace `chdir`**, las fotos acaban en `<raíz>/output/captures/`
-    y se buscan en `server/output/captures/`. Medido: **2.948 ficheros en la
-    primera, la segunda no existe**. El panel de Capturas del cliente marca
-    **0** con 1.474 capturas en disco, y `tienda_capturas` nunca se llena.
-21. **Un `try/except` gigante tumba todo el stack facial.**
-    `tiendas_modelos.py:278` carga Caffe, YuNet, InsightFace, ArcFace y OSNet
-    dentro del mismo bloque. Cualquier fallo en el primero se lleva a los
-    demás. Con OpenCV 5 pasa de verdad. Conviene separar el legado del resto.
-22. **Tres sitios afirman que la rama corporal está apagada y mienten:**
-    `setup_modelos.py` (su resumen), el contador `body_sin_modelo` (cuenta
-    «corrió y no valió») y `rama_corporal_activa` (✅ arreglado en `576e53a`).
-    Los dos primeros siguen vivos.
-23. **`site_id` sin configurar.** El log dice `server/sitio-unico`. No rompe
-    nada, pero sin él los dashboards no pueden comparar sucursales.
+No existe una cifra de acierto de género ni de edad, y **no se debe
+inventar** (`README_DEMOGRAFIA.md:218`). Para medirla hay que **etiquetar
+recortes a mano**: con 30 etiquetas, un 80 % medido es 63-90 %; con 100,
+71-87 %; con 200, 74-85 %. Los recortes son fotos de clientes: **en local**.
 
 ---
 
-## Pendientes, por prioridad
+## 6. Lo que distorsiona los datos (léelo antes de concluir)
 
-1. **Aflojar el listón de consolidación y MEDIRLO.** Es la causa nº 1 (53 %) y
-   la única que se mueve sin comprar nada. El arreglo del voto (`f7af573`) hace
-   este cambio más seguro que antes, porque ahora el sistema sí puede
-   corregirse con las lecturas siguientes. Se puede medir con el vídeo del
-   usuario antes de tocar la tienda. **Nadie lo ha probado todavía.**
-2. **Decidir qué hacer con los 119 que se pierden** (hallazgo 19). Bloqueado
-   por el usuario: hay que elegir qué significa «visitante».
-3. **La ruta de las capturas** (hallazgo 20). Pequeño y desbloquea el panel de
-   Capturas, que hoy no sirve.
-4. **El doble conteo** (hallazgos 1 y 13). Ya medido: 53 personas, 20 %.
-5. **Rendimiento (24-sep, medido):** probar **dos fotogramas en vuelo** en el
-   cliente. Es la única palanca viva; fp16, resolución y multi-GPU quedaron
-   descartadas por la medición. Línea base: **6,4 fps**. Lo hace la sesión del
-   cliente (ver su encargo).
-6. **Exponer los `descartes` de Anaqueles** en la API y el panel. Sin eso,
-   ajustar los umbrales del agarre es a ciegas.
-7. **Decisiones suyas, sin prisa:**
-   - **La semántica del número.** Con TTL se cuentan **recorridos**, no
-     personas del día. El dashboard sigue diciendo «visitantes únicos».
-   - **El destino de la rama `fix/gender`:** ¿la integra, se abre un PR?
-8. **Cosas del montaje, no del código:** dos cámaras caídas, una intermitente,
-   el desfase de imagen y la calibración (el perfil que se aplica hoy se hizo
-   en agosto mirando OTRA escena, el stand de charcutería).
-9. **Aplazados por el usuario** (no los empieces sin que lo pida): vídeo que no
-   se congela si la IA falla (hallazgo 7), y qué contar entre cámaras.
-10. **Escáner de ventanas**, pendiente de aprobación. Toca `packages/elde_core`:
-   va en rama propia.
-
-### Sin medir, si hace falta tirar del hilo
-
-- **Por qué 119 personas no tienen identidad.** `origen_demografia` sale vacío.
-- **Si el desfase entre cámaras** explica que solo 47 de 292 se enlacen.
-- **Cuánto mejora aflojar el listón**, midiéndolo con el vídeo.
-
-### Cómo medir sin el servidor del usuario (probado el 23-sep)
-
-El pipeline REAL corre en el contenedor: `TiendasProcess(client_id=...)` y
-`proc.process_frame(frame, camera_id=...)`. En CPU va a ~0,65 s/frame. **Usa el
-`camera_id` real** (`win-iVMS-4200-i58bf7b`) o no se aplica el perfil. Y lee el
-informe de calidad del clasificador **DE LA CÁMARA**
-(`proc.camera_states[cam]['_demographics']`), no el de arriba: ese no trabaja.
-Haz `os.chdir()` al scratchpad para que nada escriba en el repo.
+1. **Personal en las métricas** (5.1). Existe alta de personal
+   (`personal_api.py`); **no se ha comprobado** hasta dónde llega su exclusión.
+2. **El día se corta a las 20:00 de Venezuela** (servidor en UTC). Hoy no se
+   puede medir recurrencia (además, la galería olvida a los 30 min).
+3. **Seguimientos, capturas y personas no son lo mismo.**
+4. **`demographic_classified` incluye etiquetas provisionales.**
+5. **Edades en dos vocabularios** («joven/adulto» y rangos «26-35»).
+6. **`COUNT(*)` sobre `tienda_visitas` cuenta filas**, no personas.
+7. Los textos de las imágenes de calor muestran **«??»** (cosmético).
+8. **El producto asignado a un agarre no es fiable** (muñeca ≠ mano, 3).
+9. **El vídeo no es la tienda**: otra compresión y **otro método de captura**
+   (el reproductor es una app con GPU: modo lento de `PrintWindow`).
+10. **La GPU es compartida**: una medida de fps en dos momentos distintos
+    puede mezclar la carga ajena. Compara en la misma GPU y seguido.
 
 ---
 
-## Encargo para la sesión del CLIENTE (24-sep)
+## 7. Hallazgos pendientes
 
-Escrito por la sesión que corre en el Linux, junto al servidor. **No nos
-vemos**: esto es lo único que nos comunica.
+Antes de citar uno, **comprueba que el código sigue igual**.
+
+| # | Hallazgo | Estado |
+|---|---|---|
+| 1, 13 | **Doble conteo entre cámaras** (`tienda_almacen.demografia`, `dashboard.py:244`): 20 % de más (23-sep). `/api/v1/tienda/resumen` sí lo hace bien | vivo |
+| 19 | Clasificados sin identidad: ya se guardan en `tienda_clasificaciones` (`0ab287c`). **Decisión del usuario pendiente**: si cuentan en el dashboard | en parte |
+| 20 | **Rutas relativas al arranque** (capturas, heatmaps, eventos). **Arrancar siempre desde `server/`** | vivo |
+| 21 | **Un `try/except` gigante** (`tiendas_modelos.py:313-474`) | vivo |
+| 4 | Panel de Anaqueles: «Persona (Desconocido)» (`anaqueles_panel.py:55`, `:363`) | vivo; una línea (cliente) |
+| 22 | `setup_modelos.py` y `body_sin_modelo` dicen que la rama corporal está apagada, y mienten. **No generes el modelo PAR** | vivo |
+| 24 | **Gesto reiniciado si la cara se reconoce a mitad** (sección 3, Anaqueles) | vivo; medir en real |
+| 25 | **Muñeca ≠ mano**: producto inestable; estimar la mano con el codo | vivo |
+| 26 | **El panel del cliente no muestra productos**: el bloque en vivo `metadata['anaqueles']` no los lleva (`registro.resumen()` sin productos) | pendiente (servidor + cliente) |
+| 27 | Contador «FPS: N» del recuadro cuenta lecturas, no capturas (sección 3) | vivo (cliente) |
+| 28 | «Archivo de configuración creado» al CARGARLA (`settings_model.py:114`) | cosmético (cliente) |
+| 29 | Dashboard inalcanzable desde el navegador de Windows (sección 1) | del montaje |
+| 30 | **La ruta de captura de ventana no tiene red de seguridad**: si una respuesta se pierde, el recuadro no vuelve a enviar hasta reconectar (`render_box_captura.py:574`; la ruta DVR sí libera a los 10 s, `render_box.py:583-589`). Hoy casi no pasa (un frame en vuelo); con dos en vuelo sí | vivo (cliente) |
+| 14 | `_best_in_gallery` es O(N) en Python; con el TTL ya no urge | vivo |
+| 2, 5, 6, 7, 3, 9, 10, 12, 17, 23 | Jarvis, errores que el cliente nunca ve, DVR por IP, `main.spec`, aforo, Stand, polling `/vlm/model`, `site_id` | menores o aplazados |
+
+---
+
+## 8. Pendientes, por prioridad
+
+1. **Validar `pose_cercania` + `extremo` en la cámara REAL 3** con la tienda
+   abierta: 20-30 min con `ELDE_ANAQUELES_GRABAR` y `ELDE_ANAQUELES_DIAG`,
+   revisar **en imagen** cada agarre contado (buscar falsos: tocarse la cara,
+   braceo al pasar) y la telemetría de fps. Si da falsos, volver a los valores
+   de antes en el YAML.
+2. **Rendimiento del ciclo** (sección 9): medir en el servidor el tiempo de
+   viaje de cada foto con `header.timestamp`; en el cliente, telemetría y las
+   dos mejoras.
+3. **Estimar la mano con codo → muñeca** para el reparto por producto; medirlo
+   con el vídeo de referencia (la clienta coge **Coffee-mate**).
+4. **Aflojar el listón de consolidación y MEDIRLO** (causa n.º 1 de no
+   clasificar, 53-68 %).
+5. **Dar de alta al personal** y comprobar hasta dónde llega su exclusión.
+6. **Hora local en el servidor** (`TZ=America/Caracas`).
+7. **Rutas relativas** (hallazgo 20).
+8. **Anaqueles:** exponer los `descartes` en la API/panel; guardar la hora de
+   cada visita y agarre; productos en el panel y el dashboard (hallazgo 26).
+9. **Medir la precisión** con recortes etiquetados (5.7).
+10. **Decisiones del usuario:** clasificados sin identidad en el dashboard;
+    qué es «visitante» con el TTL; destino de las ramas (¿PR a `main`?).
+11. Hallazgo 21, vocabularios de edad, el «??», hallazgo 24.
+
+---
+
+## 9. Encargo para la sesión del CLIENTE (reescrito el 29-sep)
+
+Escrito por la sesión del Linux. **No nos vemos**: esto es lo único que nos
+comunica. **El usuario no puede tener el cliente y tu sesión abiertos a la
+vez**: todo lo que midas tiene que quedar ESCRITO en disco para leerlo
+después. **Avísale de que el fichero solo se completa al cerrar el cliente.**
 
 ### Lo que ya está medido (no lo repitas)
 
-El cuello **no está en el servidor**. Está en el ciclo secuencial: el cliente
-manda un fotograma y espera parado la respuesta. Números arriba, en «Sesión
-24-sep — RENDIMIENTO». Resumen: ciclo de **156 ms**, de los que **~57 son
-cálculo y ~99 son espera**, con la GPU al **37 %**.
+- El ciclo completo es de **~164-200 ms** con una cámara (5-6 fps); el
+  servidor trabaja **63-80 ms** de ese tiempo (sección 5.4). **Ni la GPU ni la
+  conexión son el techo.**
+- **El cliente espera la siguiente captura** después de cada respuesta
+  (sección 3, paso 5): ~25 ms de media a 20 capturas/s.
+- **`CAPTURE_MAX_WIDTH=960`**: +30 % fps, pero más caras perdidas. **No se
+  recomienda.** No lo repitas salvo para otra cosa.
+- **La ruta que importa es la de captura de ventana** (`render_box_captura.py`
+  en `packages/elde_core`, el mixin que usa `render_box.py`): por ahí van iVMS
+  y el vídeo. La ruta DVR (`render_box.py:582-646`) hoy no se usa.
 
-### Lo que falta, y que SOLO tú puedes medir
+### Tarea 1 — Medir el ciclo en el cliente (lo primero)
 
-**En qué se van esos ~99 ms.** Desde el servidor no se ve. Por fotograma
-hacen falta cinco marcas de tiempo:
+**Qué:** en qué se van los ~100-120 ms que el ciclo pasa fuera del servidor.
 
-| Marca | Dónde, aproximadamente |
-|---|---|
-| `t_captura` | el frame sale del `capture_worker` |
-| `t_jpeg` | tras `img.save(buf, "JPEG", 80)` (`render_box.py:585`) |
-| `t_envio` | tras `send_binary_frame` (`:632`) |
-| `t_respuesta` | al liberar `can_send_next_frame` (`:1753`) |
-| `t_pintado` | tras pintar el recuadro |
-
-Con eso sale el desglose: captura, compresión, ida+servidor+vuelta, pintado.
-
-### LA RESTRICCIÓN: no puedes tener el cliente y tu sesión a la vez
-
-El usuario **cierra el cliente para hablar contigo**, así que no vas a ver
-nada en vivo. **El cliente tiene que DEJAR LAS MEDICIONES ESCRITAS EN DISCO** y
-tú las lees después. Diseño propuesto:
+**Cómo (propuesta):**
 
 1. Un módulo propio (una funcionalidad, un fichero), p. ej.
-   `clients/tienda/src/core/telemetria_ciclo.py`.
-2. Escribe **una línea JSON por fotograma** (JSONL) con las cinco marcas y el
-   `camera_id`. Amortiguado, y con `flush` cada pocos segundos: si el usuario
-   cierra el cliente de golpe **no puede perderse el fichero**.
-3. Ruta FIJA y fácil de encontrar, fuera del repo: p. ej.
-   `%LOCALAPPDATA%\tienda_view\telemetria_ciclo.jsonl`. **Dile al usuario la
-   ruta exacta** para que sepa dónde está.
-4. Detrás de un **interruptor apagado por defecto** (menú Vista, como las
-   muñecas): es diagnóstico, no algo que deba correr siempre.
-5. Que **rote o se trunque**: a 6 fps son ~21.600 líneas por hora.
+   `packages/elde_core/elde_core/ui/telemetria_ciclo.py` (lo usa el mixin).
+2. Una línea JSON por frame ENVIADO con estas marcas (`time.time()`):
+   - `t_captura`: `header.timestamp` del frame (lo pone `capture_worker.py`
+     tras comprimir; ojo: `datetime.now().isoformat()`, hora local sin zona);
+   - `t_leido`: cuando `loop_show_result` lo saca del tubo;
+   - `t_envio`: tras `send_binary_frame` (`render_box_captura.py:578`);
+   - `t_respuesta`: al entrar en `on_text_message_received` (`render_box.py`);
+   - `t_pintado`: tras pintar las detecciones;
+   - más `camera_id`, bytes del JPEG y cuántas capturas se tiraron desde el
+     envío anterior.
+3. **Interruptor en el menú Vista, apagado por defecto** (como las muñecas).
+4. Ruta fija fuera del repo: `%LOCALAPPDATA%\tienda_view\telemetria_ciclo.jsonl`.
+   `flush` cada pocos segundos y rotación (a 6 fps son ~21.600 líneas/hora).
+   **Dile al usuario la ruta exacta.**
+5. Con el JSONL y las líneas `FPS [...]` del servidor (misma hora) sale el
+   reparto: esperar captura / subir / servidor / volver / pintar.
 
-Procedimiento con el usuario: enciende el interruptor → cierra la sesión
-contigo → usa el cliente unos minutos → vuelve → tú lees el JSONL y lo
-analizas. **Avísale de que el fichero solo se completa al cerrar el cliente.**
+### Tarea 2 — Mejora pequeña: mandar al instante la última captura
 
-### Y la palanca que hay que probar: DOS fotogramas en vuelo
+Hoy, al llegar la respuesta, se pone `can_send_next_frame = True`
+(`render_box.py:1845`) y se espera la **siguiente** captura; las que llegaron
+mientras tanto ya se tiraron (`render_box_captura.py:506-511`).
 
-Hoy `can_send_next_frame` es un booleano: un fotograma en vuelo y a esperar.
-La propuesta es permitir **dos**, para que las dos mitades se solapen.
+**Propuesta:** en `loop_show_result`, cuando no se puede enviar, **guardar el
+último frame** (`header`, `image_bytes`) en vez de tirarlo; al llegar la
+respuesta, si hay uno guardado sin enviar, **mandarlo ya**. Ojo: una llamada
+recursiva a `loop_show_result` se quitó por reentrancia (comentario en
+`render_box_captura.py:583-585`): programarlo con `QTimer.singleShot(0, …)`.
+**Esperado (estimado): ~−25 ms por ciclo, de ~5 a ~5,7 fps.** Medir con la
+tarea 1 y con las líneas `FPS` del servidor.
 
-- Dónde: `render_box.py:276` (estado), `:582` (la guarda), `:633` (tras
-  enviar) y `:1753` (al recibir).
-- **Riesgo bajo**: la cola del servidor ya se queda solo con el fotograma más
-  reciente por cámara, y nunca ha descartado ninguno (`descartados = 0`).
-- **Mantén la red de seguridad de los 10 s** (`:575`), que libera si la
-  respuesta se pierde. Con dos en vuelo hay que contar los pendientes, no un
-  booleano.
-- **Mídelo**: los 6,4 fps de hoy son la línea base. Si no sube, dilo — es una
-  hipótesis, no una certeza.
+### Tarea 3 — Mejora grande: dos fotogramas en vuelo
 
-### Dos cosas del cliente que ya sabemos y no hace falta re-descubrir
+`can_send_next_frame` pasa de booleano a **contador de frames en vuelo (máx.
+2)**. **Esperado (estimado): ~8-12 fps.** Tres cuidados:
 
-- **El panel de Anaqueles dice «Persona (Desconocido)»** en vez de
-  Hombre/Mujer: `anaqueles_panel.py:55-56` traduce `male/female` y el servidor
-  manda `Hombre/Mujer`, así que `:363` cae al valor por defecto. Arreglo de
-  una línea. No afecta a los contadores.
-- **El panel avisa «modelo de pose no disponible» aunque la pose funcione**
-  (`:249`): lee la bandera perezosa `pose_disponible`. Ver arriba.
+1. **La cola del servidor guarda solo el último frame por cámara**
+   (`ws_drenaje.py`): si llegan dos mientras procesa uno, **descarta el
+   anterior y ese NUNCA recibe respuesta**. Con 2 en vuelo casi nunca pasa
+   (uno procesándose, otro esperando), pero el contador tiene que **caducar**
+   cada frame pendiente (p. ej. 2 s), no esperar los 10 s de la red de
+   seguridad (`render_box_captura.py` / `render_box.py:583-589`). La
+   telemetría del servidor dice `descartados=N`. **Ojo: la ruta de ventana
+   NO tiene red de seguridad**: solo la ruta DVR libera tras 10 s
+   (`render_box.py:583-589`); en `render_box_captura.py:574` una respuesta
+   perdida deja el recuadro sin enviar hasta reconectar (hallazgo 30).
+   Añadirla es parte de esta tarea.
+2. **Modo directo:** el cliente pinta las detecciones sobre
+   `_pending_frame_bytes` (el frame enviado). Con 2 en vuelo hay que guardar
+   **una cola FIFO** de frames enviados y emparejar cada respuesta con el suyo
+   (las respuestas llegan en orden), o se pintarán cajas sobre el frame
+   equivocado.
+3. Mantener la red de seguridad de 10 s de la ruta DVR y **añadirla** a la de
+   ventana.
 
-## Cosas que no debes olvidar
+Hacerla **después** de la 1 y la 2, midiendo antes y después (línea base: el
+tramo del agarre del vídeo, ~5,0 fps a 1456 px en la GPU 1).
 
-- **Cada botón de IA es independiente**: una cámara con la IA apagada no envía
-  nada. Y los FPS se reparten entre las cámaras activas.
+### Tarea 4 — Arreglos pequeños ya localizados
+
+- **Panel de Anaqueles:** traduce `male/female` y llega `Hombre/Mujer`
+  (`anaqueles_panel.py:55-56`, `:363`): sale «Persona (Desconocido)».
+- **Panel de Anaqueles:** avisa «modelo de pose no disponible» por una bandera
+  perezosa (`:249`): vale `False` hasta el primer uso.
+- **`settings_model.py:114`** dice «creado» al cargar la configuración.
+- **Contador del recuadro:** con la IA apagada cuenta lecturas del tubo, no
+  capturas; con la IA encendida no se ve el ritmo de captura. Mostrar ambos.
+- **Productos en el panel** (hallazgo 26): necesita que el servidor los meta
+  en el bloque en vivo; coordinarlo (lo puede hacer la sesión del Linux).
+
+### Cómo probar con el usuario
+
+1. Él hace `git pull` en `C:\Users\DESARROLLO-7\Desktop\Supermercado`
+   (`git fetch origin`, `git switch feature/anaquel`, `git pull --ff-only`) y
+   comprueba el hash con `git log --oneline -1`.
+2. El núcleo `elde_core` va en modo editable (README del cliente): no hace
+   falta reinstalar; comprobarlo con
+   `clients\tienda\venv\Scripts\python.exe -c "import elde_core; print(elde_core.__file__)"`.
+3. Para variables de entorno, lanzar **solo el cliente** desde PowerShell de
+   Administrador (sección 1), no el `.bat`.
+4. Pídele **la hora** de cada prueba: el servidor escribe en UTC y él vive en
+   UTC−4.
+
+---
+
+## 10. Errores cometidos (no los repitas)
+
+1. **`git checkout -- <archivo>` sobre trabajo sin commitear lo BORRA.**
+2. **`por_id={}` del log de arranque es de los perfiles de ÁNGULO.**
+3. **`COUNT(*)` cuenta filas, no personas.**
+4. **`CALIDAD FACIAL` es acumulada.**
+5. **Commitear y publicar sin preguntar** (22-sep).
+6. **Fiarse de una telemetría rota** (el PAR, `pose_disponible`). Contrasta
+   cada bandera con un contador.
+7. **Sacar repartos de minutos de vídeo.**
+8. **Escribir en este archivo una regla sin comprobarla** (el `chdir`).
+9. **Una verificación que no verificaba nada** (error silenciado). El 28-sep,
+   otra: `curl ... | head || echo APAGADO` nunca imprime APAGADO (el `||`
+   mira a `head`).
+10. **Cruzar tracks por número entre sesiones.**
+11. **`pkill -f` con `|` en el patrón** (28-sep): el `|` es un «o» de regex,
+    el patrón casó con procesos ajenos y con el propio comando, y el servidor
+    quedó apagado sin arrancar el nuevo. Parar siempre por PID exacto.
+12. **Afirmar desde un comentario del código** que un campo nuevo tiraba el
+    100 % de los frames: `validacion_contrato.py:137-150` los tolera desde el
+    7-sep. Lee el código que decide, no el comentario de otro fichero.
+13. **Concluir de una prueba que cambia varias cosas a la vez** (29-sep, A/B
+    de `CAPTURE_MAX_WIDTH`) y dar cifras restando medias con ruido. Y
+    **proponer «el listón al 20 %» sin probar su robustez**: dependía de una
+    muestra a 2 px del borde. Perturba la entrada (mover el área unos px)
+    antes de fiarte de un resultado.
+14. **Mezclar en una frase un resultado de simulación con la realidad**: se
+    dijo «la mano en el pelo cuenta» sin aclarar que era con un área
+    ARTIFICIALMENTE alargada; el usuario buscó el frame y vio que con su área
+    no. Y se dijo «revisados en imagen» de agarres cuyas imágenes eran de
+    otra pasada. Di siempre de qué variante y de qué pasada sale cada imagen.
+15. **Afirmar la causa antes de medirla**: «la caja se ensancha con el brazo»
+    (falso: crecía en ALTO) y «el cuello es la subida por el túnel» (la A/B
+    dijo que no). Formula como hipótesis y mide.
+16. **Dar rutas de ejemplo en comandos** (`C:\ruta\a\...`): el usuario las
+    copia tal cual.
+
+Método que sí funciona: **verificar las pruebas al revés** (desactiva el
+arreglo en memoria, comprueba que falla, restáuralo) y **reproducir
+grabaciones reales fuera de línea** con el grabador: la reproducción del
+28-sep dio los mismos descartes que en vivo y permitió comparar reglas sobre
+los mismos datos.
+
+---
+
+## 11. Cosas que no debes olvidar
+
+- **Cada botón de IA es independiente**; una cámara con la IA apagada no envía.
 - **iVMS:** sus ventanas extra se ocultan si se minimiza la principal.
-- **No actualices `supervision` por encima de 0.30.1:** `sv.ByteTrack`
-  desaparece en la 0.31.
-- **El reenvío a WhatsApp está apagado** sin `vigilante_amazonas`. No lo
-  reconstruyas sin que te lo pidan.
-- **Nunca commitees** `server/models/`, `output/`, `logs/`, el `.env` ni el
-  `venv`. Usa `git add <archivos>` explícitos, nunca `git add .`.
-- **`opencv-contrib-python` TIENE que ser la 4.12.0.88.** En la 5.x se cae
-  todo el stack facial en silencio (ver «Cómo montar el entorno»).
-- **Los avisos de `mivolo.onnx` y `par_gender.onnx` «no presente» son RUIDO.**
-  MiVOLO v2 carga por otra ruta (`estimador_edad_genero.py`) y la rama corporal
-  queda activa. **No generes esos modelos**: el código no los usaría.
-- **Antes de creerte una bandera de telemetría, contrástala.** El 23-sep
-  `rama_corporal_activa` decía `False` con 235 muestras corporales aceptadas.
-  Si un indicador y un contador se contradicen, uno de los dos está viejo.
-- **`server/README.md` NO está en la lista de lectura obligatoria y debería.**
-  Ahí está la tabla de modelos esenciales contra opcionales y el peso de cada
-  rama en la votación (facial 1.0, corporal 0.5).
+- **No actualices `supervision` por encima de 0.30.1.**
+- **WhatsApp está apagado** sin `vigilante_amazonas`.
+- Los avisos de `mivolo.onnx` y `par_gender.onnx` «no presente» son **ruido**.
+- **MediaPipe está vetado.** El agarre usa las muñecas de ViTPose.
+- **No se usa ningún módulo de OpenCV contrib.**
+- **`informes/` es del usuario y no se commitea** (fotos de clientes). Lo
+  útil de los informes está resumido en 5.1 y 5.6.

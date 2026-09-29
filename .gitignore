@@ -160,3 +160,8 @@ deploy/docker/wheelhouse/*
 server/output_*/
 server/logs_*/
 .desplegado_docker
+
+# ===== Informes locales del usuario (29-sep-2026) =====
+# Informes y mapas de calor que se generan para el cliente final: llevan
+# fotos de la tienda con clientes y solo viven en el equipo donde se hacen.
+informes/
