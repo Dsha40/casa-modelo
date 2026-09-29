@@ -62,10 +62,35 @@ agarre_asentamiento_s: 1.2
 # VIAJAR desde fuera hasta dentro; el temblor de la muñeca colgando
 # alrededor del borde no llega.
 agarre_amplitud_min: 0.30
+# Desde dónde se mide ese viaje (cambiado el 29-sep-2026).
+#   ANTES: agarre_amplitud_desde: ultimo  → desde la ÚLTIMA vez que se vio
+#          la mano fuera. Si esa muestra iba rozando el borde (-3 px), el
+#          viaje salía corto aunque la mano viniera de lejos.
+#   AHORA: extremo → desde el punto MÁS alejado en que se vio fuera.
+agarre_amplitud_desde: extremo
 # Confianza mínima del keypoint de muñeca (calibrado en la degustación).
 conf_muneca_min: 0.30
 # Pose como mucho para estas personas por frame (las más cercanas).
 pose_max_personas: 4
+# A quién se le mira la muñeca (cambiado el 29-sep-2026).
+#   ANTES: pose_cercania: false → solo a quien está QUIETO pisando el área.
+#          Al alargar el brazo el cuerpo se mueve, y con una balda por
+#          encima de la cabeza la persona ni siquiera pisa el área hasta
+#          subir el brazo: la máquina dejaba de mirar justo cuando entraba
+#          la mano y no contaba el agarre.
+#   AHORA: true → también a quien está CERCA del área (debajo o delante),
+#          aunque se mueva. Contar un agarre sigue exigiendo lo mismo.
+#   Medido el 28-sep con la grabación del 23-sep de la cámara 3 (clienta
+#   cogiendo Coffee-mate de la balda alta): con los valores de ANTES, 0
+#   agarres; con estos dos, 2, los dos reales (revisados en imagen) y
+#   repetido en vivo dos veces. Coste: la pose se calcula ~8 veces más a
+#   menudo; con alguien delante del estante, ~15-20 ms más por frame.
+#   AÚN NO MEDIDO en las cámaras en vivo: si aparecen agarres que no
+#   ocurrieron, volver a los dos valores de ANTES.
+pose_cercania: true
+# «Cerca» = su caja solapa el área en horizontal y su borde de arriba no
+# queda más abajo del área que esta fracción de su propia altura.
+cercania_frac_alto: 0.5
 
 # ── Geometría ───────────────────────────────────────────────────────────
 # Fracción SUPERIOR del bbox que cuenta como «alcanza el estante».
@@ -95,4 +120,12 @@ surte_dwell_s: 3.0
 # camaras:
 #   win-iVMS-4200:
 #     franja_superior: 0.5
+#
+# OJO: la clave es el camera_id EXACTO, con el sufijo de la instalación
+# (`-i58bf7b`), y los nombres cambian a menudo (título de la ventana, número
+# de canal, instalación). Si el nombre no coincide, el bloque se IGNORA sin
+# avisar. Por eso lo que vale para todas las cámaras va arriba, como norma
+# general: aquí solo excepciones de verdad. (El 28-sep hubo aquí un bloque
+# para `win-Media_Player-c3-i58bf7b` con `pose_cercania` y
+# `agarre_amplitud_desde`; el 29-sep se pasaron a la norma general.)
 camaras: {}

@@ -49,6 +49,7 @@ igual que hace con la flecha de permanencia.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import deque
 from pathlib import Path
@@ -57,13 +58,21 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
-from . import anaqueles_productos
+from . import anaqueles_grabador, anaqueles_productos
 from .anaqueles_pose import PoseMunecas
 from .anaqueles_registro import GRID_DIM, RegistroAnaqueles
 from .estacionamiento_escena import DetectorEscena
 from .tiendas import TiendasProcess
 
 logger = logging.getLogger(__name__)
+
+#: Diagnóstico del gesto (28-sep-2026): con `ELDE_ANAQUELES_DIAG=1` el log
+#: cuenta, frame a frame, qué ve la máquina del agarre de CADA muñeca
+#: (profundidad, quietud, armado) y por qué descarta. Existe porque el
+#: 28-sep un vídeo que ya había contado agarres dejó de contarlos con la
+#: mano visiblemente dentro, y los `descartes` no se ven en ningún sitio.
+#: Apagado por defecto: a 6 fps son varias líneas por frame.
+_DIAG = os.getenv('ELDE_ANAQUELES_DIAG', '').strip() not in ('', '0')
 
 #: Nombre del modo tal como lo pide el cliente por WebSocket.
 MODO = "Anaqueles"
@@ -127,6 +136,53 @@ _DEFECTOS: Dict[str, Any] = {
     # VIAJAR desde donde estaba fuera hasta dentro del nivel. El temblor de
     # la muñeca colgando (20-50 px alrededor del borde) no llega.
     'agarre_amplitud_min': 0.30,
+    # ── Correcciones del 28-sep-2026, APAGADAS por defecto ──
+    # Salen de un vídeo real (la grabación del 23-sep de la cámara 3, 482
+    # frames reproducidos con el grabador de diagnóstico) en el que una
+    # clienta coge botes de Coffee-mate de la balda ALTA y la máquina no
+    # contaba nada. Resultado de reproducirlo con cada regla, mismo área:
+    #   regla de siempre ................ 0 agarres
+    #   solo `pose_cercania` ............ 1
+    #   `pose_cercania` + `extremo` ..... 2 (los dos reales, revisados en
+    #                                      imagen; repetido en vivo 2 veces)
+    # El defecto del CÓDIGO sigue apagado (así las pruebas fijan la regla de
+    # siempre), pero desde el 29-sep `anaqueles_config.yaml` las ENCIENDE
+    # como norma general para todas las cámaras, con los valores anteriores
+    # comentados al lado. Aún no medidas en las cámaras en vivo.
+    #
+    #  - `agarre_amplitud_desde`: 'ultimo' mide el viaje desde la ÚLTIMA
+    #    muestra de mano fuera; si esa fue rozando el borde (-3 px), el
+    #    viaje medido se queda en ~25 px aunque la mano viniera de -30.
+    #    'extremo' lo mide desde el punto MÁS alejado de esa racha fuera.
+    #    Sola no cambió nada; junto a `pose_cercania` aportó el 2.º agarre.
+    'agarre_amplitud_desde': 'ultimo',
+    #
+    # PROBADAS Y QUITADAS el 29-sep-2026 (no las vuelvas a añadir sin datos
+    # nuevos que las justifiquen):
+    #  - `agarre_quietud='antes_de_entrar'`: exigir la quietud con la mano
+    #    aún FUERA en vez de al contar. 0 agarres en el mismo vídeo, igual
+    #    que la regla de siempre: la clienta alargó el brazo nada más
+    #    llegar y no había estado 1,2 s quieta en ningún momento, ni antes
+    #    ni después de entrar.
+    #  - `pose_en_movimiento`: pose también para quien se mueve DENTRO de
+    #    la compuerta. 0 agarres: la mano entra con el brazo en alto, y con
+    #    el brazo abajo la compuerta está CERRADA (la balda queda por encima
+    #    de la cabeza), así que ni siquiera así se veía la entrada. Subió
+    #    la pose de 40 a 54 cálculos sin cambiar un solo conteo. Lo que sí
+    #    resolvió el caso es `pose_cercania`, que la cubre: mira también a
+    #    quien se mueve, y además a quien está debajo del área.
+    #
+    #  - `pose_cercania` (28-sep-2026): mirar la muñeca de quien está CERCA
+    #    del área (su caja la solapa en horizontal y su borde de arriba no
+    #    queda más de `cercania_frac_alto` de su propio alto por debajo del
+    #    área), aunque se mueva o aún no pise la compuerta. Medido sobre un
+    #    vídeo real: con pose solo «en compuerta y quieto», la máquina vio la
+    #    muñeca a -34 px y 2 s después a +92 px, y se perdió la entrada
+    #    entera (-158 → +49 → +74): con el brazo abajo la compuerta está
+    #    cerrada y al subirlo el cuerpo cuenta como «en movimiento». Contar
+    #    sigue exigiendo lo mismo; esto solo deja de mirar a saltos.
+    'pose_cercania': False,
+    'cercania_frac_alto': 0.5,
     'conf_muneca_min': 0.30,
     # Pose solo para quienes están en compuerta, y como mucho estos por
     # frame (los más cercanos al anaquel): N personas = N inferencias.
@@ -755,6 +811,9 @@ class MedidorAnaqueles:
 
     def _anotar_descarte(self, motivo: str) -> None:
         self._descartes[motivo] = self._descartes.get(motivo, 0) + 1
+        if _DIAG and motivo.startswith('agarre'):
+            logger.info("anaqueles-diag[%s] DESCARTE %s (acumulado %d)",
+                        self.camera_id, motivo, self._descartes[motivo])
 
     def _medir(self, frame: np.ndarray, personas: List,
                demografia: Any, t: float, dt: float) -> Dict[int, int]:
@@ -767,6 +826,9 @@ class MedidorAnaqueles:
         en_compuerta: set = set()
         personas_por_area: Dict[int, int] = {}
         candidatos_pose: Dict[str, Tuple[Any, Tuple, List[int]]] = {}
+        cercania = bool(self.cfg.get('pose_cercania', False))
+        #: (área, pid) de quien está CERCA este frame (solo con cercania).
+        cerca: set = set()
         vivos = {tid for _p, tid, _b in personas}
 
         for pid, tid, box in personas:
@@ -833,8 +895,18 @@ class MedidorAnaqueles:
                     idx, deque(maxlen=40)).append((t, cx, cy, ancho, tid))
                 self._contar_visita(idx, pid, tid, demografia, t)
             # Pose SOLO para quien está QUIETO en compuerta: correrla sobre
-            # los que caminan gasta GPU y su braceo no puede contar.
-            if areas_de_pid and quieto:
+            # los que caminan gasta GPU y su braceo no puede contar. Con
+            # `pose_cercania` (ver _DEFECTOS), también para quien está cerca
+            # del área aunque se mueva o no pise la compuerta: contar sigue
+            # exigiendo la quietud.
+            if cercania:
+                areas_pose = list(areas_de_pid) + [
+                    i for i in range(len(self._poligonos))
+                    if i not in areas_de_pid and self._cerca_de_area(box, i)]
+                if areas_pose:
+                    candidatos_pose[pid] = (tid, box, areas_pose)
+                    cerca.update((i, pid) for i in areas_pose)
+            elif areas_de_pid and quieto:
                 candidatos_pose[pid] = (tid, box, areas_de_pid)
 
         # Cierre de estancias CON GRACIA (v3): un solo miss del detector
@@ -851,7 +923,10 @@ class MedidorAnaqueles:
             self._compuerta_desde.pop(clave, None)
             self._quieto_en_area.pop(clave, None)
             self._visita_abierta.discard(clave)
-            self._agarre_estado.pop(clave, None)
+            # Con `pose_cercania`, bajar el brazo (compuerta cerrada) no
+            # borra el gesto a medias mientras la persona siga cerca.
+            if clave not in cerca:
+                self._agarre_estado.pop(clave, None)
 
         # Poda de trayectorias con la misma gracia (tid no visto > 2 s).
         for tid in list(self._trayectoria):
@@ -902,6 +977,23 @@ class MedidorAnaqueles:
             return 0.0, area_franja
         return _solape_rect_poligono((x1, y1, x2, ym), poli), area_franja
 
+    def _cerca_de_area(self, box: Tuple[float, float, float, float],
+                       idx: int) -> bool:
+        """¿La persona está debajo o delante del área, al alcance del brazo?
+
+        Su caja solapa el área en horizontal, no queda entera por encima, y
+        su borde de arriba no está más abajo del área que `cercania_frac_alto`
+        de su propio alto (una balda alta queda por encima de la cabeza: la
+        compuerta no se abre hasta que el brazo sube, y esto sí).
+        """
+        if idx >= len(self._cajas_area):
+            return False
+        ax1, ay1, ax2, ay2 = self._cajas_area[idx]
+        x1, y1, x2, y2 = (float(v) for v in box[:4])
+        frac = float(self.cfg.get('cercania_frac_alto', 0.5))
+        return (x2 > ax1 and x1 < ax2 and y2 > ay1
+                and y1 <= ay2 + frac * (y2 - y1))
+
     def _toca_area(self, box: Tuple[float, float, float, float], idx: int,
                    poli: np.ndarray, franja: float) -> bool:
         """Versión booleana (la usa la vía de PERSONAL para el «surte»)."""
@@ -947,6 +1039,8 @@ class MedidorAnaqueles:
         rearme = int(self.cfg.get('agarre_rearme_frames', 2))
         asentamiento = float(self.cfg.get('agarre_asentamiento_s', 1.2))
         amplitud_frac = float(self.cfg.get('agarre_amplitud_min', 0.30))
+        desde_extremo = (self.cfg.get('agarre_amplitud_desde', 'ultimo')
+                         == 'extremo')
 
         # Los bbox más grandes primero: son los más cercanos al anaquel y a
         # la cámara, donde la pose es fiable. El resto espera su frame.
@@ -957,6 +1051,14 @@ class MedidorAnaqueles:
 
         for pid, (tid, box, areas_de_pid) in orden:
             munecas = self.pose.munecas(frame, box)
+            if _DIAG:
+                logger.info(
+                    "anaqueles-diag[%s] t=%.2f pid=%s tid=%s areas=%s "
+                    "quieto=%.1fs munecas=%s", self.camera_id, t,
+                    _corto(pid), tid, areas_de_pid, self._quieto_dur(tid, t),
+                    [(m[3] if len(m) > 3 else '?', round(float(m[0])),
+                      round(float(m[1])), round(float(m[2]), 2))
+                     for m in munecas])
             ancho_bbox = max(1.0, float(box[2]) - float(box[0]))
             cx = (float(box[0]) + float(box[2])) / 2.0
             cy = (float(box[1]) + float(box[3])) / 2.0
@@ -1043,6 +1145,15 @@ class MedidorAnaqueles:
                         'armado': False, 'dentro': 0, 'fuera': 0,
                         'fuera_pos': None, 'fuera_centro': None,
                         'fuera_ts': 0.0})
+                    if _DIAG:
+                        # Estado ANTES de este frame: con esto se ve si la
+                        # muñeca llegó a armarse, y cuál de las dos.
+                        logger.info(
+                            "anaqueles-diag[%s]   area=%d lado=%s prof=%.1f "
+                            "(exige %.1f, fuera si <%.1f) armado=%s "
+                            "dentro=%d fuera=%d", self.camera_id, idx, lado,
+                            prof, prof_ef, prof_ef * 0.5, est['armado'],
+                            est['dentro'], est['fuera'])
                     if prof >= prof_ef:
                         est['dentro'] += 1
                         est['fuera'] = 0
@@ -1072,6 +1183,27 @@ class MedidorAnaqueles:
                                 ((mx - cx) - (origen[0] - centro0[0])) ** 2
                                 + ((my - cy)
                                    - (origen[1] - centro0[1])) ** 2) ** 0.5
+                            if _DIAG:
+                                # TODAS las evaluaciones, pasen o no: para
+                                # ver cuánto sobra o falta, y cuánto del
+                                # «viaje» se come la caja al estirar el
+                                # brazo (se ensancha y su centro se mueve
+                                # hacia la mano).
+                                fb = est.get('fuera_box') or tuple(box[:4])
+                                logger.info(
+                                    "anaqueles-diag[%s]   AMPLITUD ok=%s "
+                                    "viaje=%.0f bruto=%.0f ancho=%.0f "
+                                    "ancho_fuera=%.0f alto=%.0f "
+                                    "alto_fuera=%.0f exige=%.0f "
+                                    "dcx=%.0f dcy=%.0f", self.camera_id,
+                                    viaje >= amplitud_frac * ancho_bbox,
+                                    viaje, ((mx - origen[0]) ** 2
+                                            + (my - origen[1]) ** 2) ** 0.5,
+                                    ancho_bbox, fb[2] - fb[0],
+                                    float(box[3]) - float(box[1]),
+                                    fb[3] - fb[1],
+                                    amplitud_frac * ancho_bbox,
+                                    cx - centro0[0], cy - centro0[1])
                             if viaje < amplitud_frac * ancho_bbox:
                                 self._anotar_descarte('agarre_amplitud')
                                 continue
@@ -1103,10 +1235,19 @@ class MedidorAnaqueles:
                     elif prof < prof_ef * 0.5:
                         # Fuera o superficial (histéresis): SOLO esta misma
                         # muñeca puede armarse con esta evidencia.
+                        racha_nueva = est['fuera'] == 0
                         est['fuera'] += 1
                         est['dentro'] = 0
-                        est['fuera_pos'] = (mx, my)
-                        est['fuera_centro'] = (cx, cy)
+                        # 'extremo': el origen del viaje es el punto MÁS
+                        # fuera de esta racha, no la última muestra (que
+                        # puede ir rozando el borde).
+                        if (not desde_extremo or racha_nueva
+                                or prof <= est.get('fuera_prof', 1e9)):
+                            est['fuera_pos'] = (mx, my)
+                            est['fuera_centro'] = (cx, cy)
+                            est['fuera_prof'] = prof
+                            est['fuera_box'] = tuple(float(v)
+                                                     for v in box[:4])
                         est['fuera_ts'] = t
                         if est['fuera'] >= rearme:
                             est['armado'] = True
@@ -1496,9 +1637,20 @@ class Anaqueles(TiendasProcess):
         # Después de las zonas: un producto solo vale si su área existe.
         self._medidor.poner_productos(productos)
 
+        tracks = self._tracks_de(camera_id)
+        ahora = time.time()
+        # Grabación de diagnóstico (28-sep-2026), apagada salvo con
+        # ELDE_ANAQUELES_GRABAR: lo MISMO que recibe el medidor, con el mismo
+        # reloj, para poder reproducirlo fuera de línea.
+        grabador = anaqueles_grabador.grabador()
+        if grabador is not None:
+            grabador.grabar(camera_id, image, tracks, zonas, nombres,
+                            productos, ahora)
+
         return self._medidor.procesar(
-            image, self._tracks_de(camera_id),
+            image, tracks,
             self._demografia_de(camera_id),
+            ahora=ahora,
             # El reidentificador NO participa del swap por cámara: aquí
             # sigue siendo consultable, y es de donde salen los embeddings
             # para reconocer al personal enrolado.
