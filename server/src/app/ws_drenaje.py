@@ -41,11 +41,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import msgpack
+
+from . import telemetria_fps
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +172,8 @@ class DrenajeCliente:
     def encolar(self, item: ItemFrame) -> None:
         """La llama el lector. Nunca bloquea, nunca lanza."""
         if not self._stopped:
+            telemetria_fps.anotar_recibido(
+                item.camera_id, telemetria_fps.tamano_de_payload(item.payload))
             self.cola.poner(item)
 
     # -- La tarea ---------------------------------------------------------
@@ -181,8 +186,11 @@ class DrenajeCliente:
                 break
 
             try:
+                t_proc = time.monotonic()
                 result = await loop.run_in_executor(
                     self._executor_getter(), self._procesar, *item.payload)
+                telemetria_fps.anotar_procesado(
+                    item.camera_id, (time.monotonic() - t_proc) * 1000.0)
             except asyncio.CancelledError:
                 break
             except Exception as exc:                        # noqa: BLE001
