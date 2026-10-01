@@ -184,8 +184,9 @@ _DEFECTOS: Dict[str, Any] = {
     'pose_cercania': False,
     'cercania_frac_alto': 0.5,
     'conf_muneca_min': 0.30,
-    # Pose solo para quienes están en compuerta, y como mucho estos por
-    # frame (los más cercanos al anaquel): N personas = N inferencias.
+    # Pose solo para quienes están en compuerta y quietos (o también cerca
+    # del área, con `pose_cercania`), y como mucho estos por frame (los más
+    # cercanos al anaquel): N personas = N inferencias.
     'pose_max_personas': 4,
     # Qué fracción SUPERIOR del bbox cuenta como «alcanza el estante»: el
     # ancla de pie del padre es inútil a la altura de un anaquel.

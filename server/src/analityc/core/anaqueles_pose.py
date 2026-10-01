@@ -14,11 +14,14 @@ el mismo que usa la degustación del stand
 
 Correr pose sobre el frame completo paga por toda la escena en cada frame.
 Sobre el recorte del bbox solo se paga por quien está pegado al anaquel
-(medido en la 5060 Ti: ~41 fps por recorte), y el que llama decide a quiénes:
-el medidor solo pide pose de los tracks que ya están en la compuerta de un
-área. Los keypoints vuelven en coordenadas del recorte; aquí se les suma el
-origen para devolverlos en coordenadas del FRAME, que es donde viven los
-polígonos de las áreas.
+(medido en la 5060 Ti: ~41 fps por recorte), y el que llama decide a quiénes
+(`anaqueles.py`, en `_medir`): por defecto, solo a quien está QUIETO en la
+compuerta de un área; con `pose_cercania` —encendida en
+`anaqueles_config.yaml` desde el 29-sep-2026— también a quien está en la
+compuerta aunque se mueva y a quien está CERCA del área sin pisarla. Como
+mucho `pose_max_personas` por frame. Los keypoints vuelven en coordenadas
+del recorte; aquí se les suma el origen para devolverlos en coordenadas del
+FRAME, que es donde viven los polígonos de las áreas.
 """
 
 from __future__ import annotations

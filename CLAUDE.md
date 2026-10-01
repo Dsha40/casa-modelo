@@ -1,7 +1,7 @@
 # CLAUDE.md — ELDE Tiendas (contexto de trabajo)
 
-Traspaso de las sesiones del 16-18, 21-22, 23, 24, 25, 28 y **29 de
-septiembre de 2026**. **Este archivo SÍ se commitea**: vive en la rama para
+Traspaso de las sesiones del 16-18, 21-22, 23, 24, 25, 28, 29 y **30 de
+septiembre de 2026** (actualizado el 1-oct). **Este archivo SÍ se commitea**: vive en la rama para
 que la siguiente sesión lo lea sin que el usuario tenga que pegarlo.
 
 **Rama actual: `feature/anaquel`** (publicada). Cuelga de `fix/gender` →
@@ -132,14 +132,32 @@ crear contenedores.
 | **El del contenedor** | lo arranca Claude o el usuario aquí | `localhost:9000` desde Windows (túnel) |
 | **El de `pop-os`** | en el anfitrión | `72.68.60.141:9000`. **Código desconocido y NO escribe en nuestro log** |
 
-### Arrancar y parar el servidor (así, desde el 29-sep)
+### Arrancar y parar el servidor (así, desde el 30-sep)
+
+**Desde el 29-sep el servidor del contenedor lo lleva la sesión Linux de
+Claude** (lo pidió el usuario). Antes de arrancar uno, mira si ya hay uno
+(`pgrep` de abajo y `/health`). El 1-oct seguía vivo el **PID 143431**
+(arrancado el 30-sep 16:12 Venezuela).
 
 ```bash
 cd /home/D-arias365/proyectos/ELDE-TIENDAS/server       # DESDE server/
+echo "=== arranque $(date -u '+%F %T') UTC | GPU 1 | lanzado por Claude ===" >> logs/consola_servidor.log
 CUDA_VISIBLE_DEVICES=1 setsid nohup ../.venv/bin/python -u iniciar_servidor_headless.py \
-    > <scratchpad>/servidor.log 2>&1 < /dev/null &
-curl -s http://localhost:9000/health                     # comprobar
+    >> logs/consola_servidor.log 2>&1 < /dev/null &
+curl -s --retry 60 --retry-delay 2 --retry-connrefused -m 3 -o /dev/null \
+    -w '%{http_code}\n' http://localhost:9000/health      # espera sin sleep
 ```
+
+- **La salida de consola va a `server/logs/consola_servidor.log`** (fuera
+  de git, se AÑADE; cada arranque deja una línea `=== arranque ... ===`).
+  Antes iba al scratchpad de la sesión que lo lanzaba y cada sesión nueva
+  tenía que buscarla con `readlink /proc/<pid>/fd/1`. **No rota**: crece
+  ~2 MB/h con una cámara (un `print` por frame).
+- `setsid` hace fork: el `$!` es el lanzador y termina al instante. El PID
+  real, con el `pgrep` de abajo.
+- **Primera imagen tras arrancar: ~25 s** (carga y compila RF-DETR); la
+  primera persona junto a un estante carga ViTPose (4 s el 29-sep, **53 s**
+  el 30-sep con la máquina en swap). Mientras, `/health` puede no responder.
 
 - **Desde `server/`.** Desde la raíz, capturas y heatmaps van a
   `<raíz>/output/` y el dashboard no los ve (hallazgo 20).
@@ -169,8 +187,15 @@ FPS [cam] recibidos=6.1/s procesados=6.1/s descartados=0 proceso=63/114 ms entra
 ```
 
 `grep "FPS \[" server/logs/server.log | tail`. `proceso` = mediana/p90 del
-tiempo del frame DENTRO del servidor (no incluye recibirlo por el websocket
-ni enviar la respuesta).
+tiempo del frame DENTRO del servidor (sí incluye abrir el JPEG, `app.py:1089`;
+no incluye recibirlo por el websocket ni enviar la respuesta).
+`descartados` = frames que la cola REEMPLAZÓ sin procesar (corregido el
+30-sep). **Antes era `recibidos − procesados` de cada periodo y mentía**:
+contaba como perdido el frame en vuelo que cerraba el periodo (70 de 246
+líneas del 29-sep decían `descartados=1`), mientras el aviso real de la cola
+(`ColaUltimoFrame`, sale con el PRIMER reemplazo) no aparece desde el 17-sep.
+Las líneas escritas por un servidor arrancado antes de ese cambio siguen con
+la resta.
 
 ### Las pruebas
 
@@ -182,7 +207,7 @@ cd server && ELDE_TIENDA_DB=<scratchpad>/tienda_pruebas.db PYTHONPATH=<scratchpa
     ../.venv/bin/python -m pytest tests -q -p no:cacheprovider
 ```
 
-**Línea base (29-sep): `849 passed, 16 skipped, 2 xfailed`.** Si ves un
+**Línea base (30-sep): `852 passed, 16 skipped, 2 xfailed`.** Si ves un
 `failed`, es tuyo. Las de `packages/elde_core` necesitan PySide6: aquí no
 corren; las que nombran a otros clientes (`clients/amazonas`, `detecciones`,
 `perimetrales`) fallan siempre porque esas carpetas no existen en este corte.
@@ -210,6 +235,16 @@ y `opencv-contrib-python-headless` **tiene que ser la 4.12.0.88**.
   usa `"${D:?}/${x:?}"` o, mejor, no borres: descarga a scratchpad y copia.
 - **A veces la herramienta Bash deja de responder** («classifier gave no
   verdict»). Es pasajero; mientras, `Read` sigue funcionando (logs, `.git/`).
+- **El disco y la RAM se comparten con el anfitrión `pop-os`.** El 30-sep,
+  de ~14:21 a ~16:05 (Venezuela), un proceso DEL ANFITRIÓN llenó `/dev/sda3`
+  al 100 % (medido: ningún proceso del contenedor escribía más de 16 KB en
+  10 s). Consecuencias: «disk I/O error» en la base, el log cortado a media
+  línea y, con IA, la imagen del cliente pegada. **El usuario no quiere
+  borrar nada nuestro para liberar** (se lo comería el anfitrión); lo
+  arregla quien administra `pop-os`. Comprobar: `df -h
+  /home/D-arias365/proyectos`; presión de memoria y disco:
+  `cat /proc/pressure/{memory,io}`. Ese día el servidor llegó a tener 2,5 GB
+  en swap y el disco estuvo ocupado el 45-67 % del tiempo.
 
 ---
 
@@ -247,8 +282,11 @@ concluir: en el log, `Media_Player` es el vídeo, `iVMS` la tienda en vivo.
 2. `camera_id`: `elde_core/ui/identidad_camara.py` (`win-<título>[-cN]-i<inst>`).
    **Los nombres cambian a menudo** (título de ventana, canal, instalación).
 3. Servidor `app.py` → cola del último frame por cámara (`ws_drenaje.py`;
-   descarta el anterior si llega otro de la misma cámara antes de procesarlo:
-   0-1 cada 30 s) → `TiendasProcess.process_frame`.
+   descartaría el anterior si llegara otro de la misma cámara antes de
+   procesarlo, pero con el cliente de hoy —un frame en vuelo— **no pasa
+   nunca**: ningún aviso `ColaUltimoFrame` desde el 17-sep. El «0-1 cada
+   30 s» que se leía aquí era la resta mal hecha de la telemetría, sección
+   1) → `TiendasProcess.process_frame`.
 4. Pipeline: RF-DETR → ByteTrack por cámara → identidad
    (`face_reidentifier.py`) → entradas/salidas del ROI → demografía → base.
 5. El modo **`Anaqueles`** (`anaqueles.py`) hereda todo lo de `Tiendas` y
@@ -262,7 +300,7 @@ concluir: en el log, `Media_Player` es el vídeo, `iVMS` la tienda en vivo.
 
 | | **Captura de ventana** (iVMS, el reproductor… lo que se usa HOY) | **DVR / stream** (panel Dispositivos) |
 |---|---|---|
-| Quién captura | proceso aparte `capture_worker.py`, **sin pausa** entre capturas (`:240`) | hilo `rtsp_worker.py` |
+| Quién captura | proceso aparte `capture_worker.py` (bucle en `:240`); **cada vuelta acaba con `time.sleep(1 / 60)`** (`:315`, sin comentario: llegó con el corte del monorepo, `2a1c9b1`, y el porqué no viajó). Hasta el 30-sep aquí ponía «sin pausa»: era falso | hilo `rtsp_worker.py` |
 | Cómo | `PrintWindow`: modo rápido ~11 ms o modo para apps con GPU ~33 ms (`:219-224`) | stream nativo |
 | Tamaño | ancho máx. **1600** px (`CAPTURE_MAX_WIDTH`, `:35-38`); la ventana de iVMS mide 1456×868 | **sin límite** (resolución nativa) |
 | JPEG | calidad **70** (`:297`) | calidad **80** (`render_box.py:593`) |
@@ -271,15 +309,20 @@ concluir: en el log, `Media_Player` es el vídeo, `iVMS` la tienda en vivo.
 **El ciclo (una cámara), paso a paso:**
 
 1. El proceso de captura entrega JPEG por un tubo, ~**20 por segundo** (dato
-   del usuario con la IA apagada).
+   del usuario con la IA apagada). Ese techo lo ponen `PrintWindow`, la
+   compresión JPEG con PIL (`:297`) y la pausa de 1/60 s (`:315`).
 2. El recuadro lee el tubo, **se queda con el último y tira los intermedios**
    (`render_box_captura.py:506-511`). Si `can_send_next_frame` es True, lo
    manda (~**300 KB**) y lo pone a False (`:574-579`).
 3. El servidor lo procesa: **63-80 ms** (telemetría). **Es lo único que hace
    trabajar a la GPU.**
 4. Vuelve la respuesta (**modo directo**: solo detecciones, sin imagen,
-   `render_box.py:286`) y el cliente pone `can_send_next_frame = True`
-   (`render_box.py:1845`) **sin mandar nada**.
+   `render_box.py:286`) y el cliente **primero la dibuja** —vuelve a abrir
+   el JPEG enviado y lo anota con Supervision o QPainter,
+   `render_box.py:1624-1636`, `:1649-1686`— y **solo después** pone
+   `can_send_next_frame = True` (`render_box.py:1845`, en el `finally`),
+   **sin mandar nada**. El dibujo cuenta dentro del ciclo (corregido el
+   30-sep: antes no se decía).
 5. **Espera a la SIGUIENTE captura** (las que llegaron mientras esperaba ya se
    tiraron). A 20 capturas/s son 0-50 ms, ~25 de media. Vuelve al paso 2.
 
@@ -334,8 +377,9 @@ encendida se sustituye por «IA: N FPS» = **respuestas del servidor**
   mueva o no pise la compuerta) y `agarre_amplitud_desde: extremo` (medir el
   recorrido desde el punto más alejado en que se vio la mano fuera). **Los
   valores anteriores están comentados al lado** (`false` y `ultimo`) para
-  volver atrás. El defecto del CÓDIGO sigue apagado. **Aún no medido en las
-  cámaras en vivo.**
+  volver atrás. El defecto del CÓDIGO sigue apagado. **Primeros datos en la
+  cámara 3 en vivo (29-30 sep): 2 agarres contados, 1 revisado en imagen y
+  real** (sección 8, punto 1); todavía poca muestra.
 - **Probadas y QUITADAS el 29-sep** (documentado en `anaqueles.py`, junto a
   `_DEFECTOS`): `agarre_quietud='antes_de_entrar'` y `pose_en_movimiento`.
   No cambiaron ni un conteo en el vídeo. No las vuelvas a añadir sin datos.
@@ -367,7 +411,7 @@ encendida se sustituye por «IA: N FPS» = **respuestas del servidor**
 | Eventos por persona | `output/analytics_log_<camera_id>.jsonl`: `person_detected` y `demographic_classified` (**incluye provisionales**) |
 | Anaqueles | `server/output/anaqueles/<camera_id>/<AAAA-MM-DD>.json` (**totales por día** UTC, con `productos`) y `fotos_ref/<área>.jpg` (recorte exacto del área cuando estaba vacía) |
 | Heatmaps | `output/heatmap/<camera_id>.png` y `history/<cámara>/<AAAA-MM-DD_HH>.{png,json}` |
-| **Informes del usuario** | **`informes/`** (local, **fuera de git**): `informe_2026-09-25.md`, `informe_2026-09-28.md`, `heatmaps_2026-09-28/` y su `.zip` |
+| **Informes del usuario** | **`informes/`** (local, **fuera de git**): `informe_2026-09-25.md`, `informe_2026-09-28.md`, `informe_2026-09-29.md`, `informe_2026-09-30.md`, `informe_2026-09-30_tarde.md`, **`Pendientes_Rendimiento.md`** (lista de 17 cambios de rendimiento, de fácil a difícil) |
 | Config del cliente | `%LOCALAPPDATA%\tienda_view\tienda_view\config.json`, **cifrada a propósito**. Al cargarla imprime «Archivo de configuración **creado**» aunque la haya **cargado** (`settings_model.py:114`) |
 
 APIs útiles: `/health`, `/api/v1/tienda/{resumen,serie,pasillos,demografia,
@@ -392,6 +436,7 @@ clasificaciones,capturas}`, `/api/anaqueles/<cámara>/resumen`,
 | `a8ee806` | ídem | **productos dentro de los anaqueles**: dibujo en el cliente, reparto de agarres, API. Probado en vivo el 28-sep |
 | `b303013` | ídem | **telemetría de fps por cámara** en el log (recibidos, procesados, tiempo de proceso, KB/s) |
 | `c690a86` | ídem | **agarres en baldas altas**: `pose_cercania` + `extremo` (encendidas en el YAML), diagnóstico (`ELDE_ANAQUELES_DIAG`) y grabador (`ELDE_ANAQUELES_GRABAR`); dos opciones probadas y quitadas |
+| `8994ba8` | ídem | **`descartados` de la telemetría = reemplazos reales de la cola** (antes, una resta que contaba el frame en vuelo) |
 
 ---
 
@@ -507,6 +552,45 @@ tienda**: 102 capturadas, 20/19 identificadas (19,6 %), 16 clasificadas
 (15,7 %; 15 H y 1 M; 75 % solo cuerpo), `muestras_insuficientes` 54,7 %;
 Anaquel 1: 1 visita y 2 agarres; estancia mediana 3,6 s.
 
+### 5.8 Cámara 3 en vivo, 29-30 sep (informes locales del 29, 30 y 30 tarde)
+
+| Tramo (Venezuela) | Capturadas | Identificadas | Clasificadas | Anaqueles |
+|---|---:|---:|---:|---|
+| 29-sep 15:00-17:03 | 273 | 17,2 % | 8,4 % | 8 visitas (A2), 0 agarres |
+| 29-sep 18:07 → 30-sep 08:44 (≈5 h de imagen buena) | 373 | 15,5 % | 14,2 % | 12 visitas A2 + 1 A1, 0 agarres |
+| 30-sep 16:00-17:26 (≈50 min de imagen buena) | 138 | 9,4 % | 8,0 % | 3 visitas A2, **1 agarre** |
+
+- **AGARRE #1 (30-sep 16:24:17, A2 → «colcafe») revisado en iVMS por el
+  usuario: real y producto correcto.** AGARRE #2 (17:38:28, A2, sin
+  producto): **sin grabación, no verificable**. Las dos personas, sin
+  identidad y sin género (`muestras_insuficientes`).
+- **La cámara 3 falla a ratos**: de noche manda imagen de ~37 KB (oscura o
+  vacía; no se ha visto) y el anaqueles suspende/reanuda el conteo ~2 veces
+  por minuto (1.206 veces una noche); también falló el 30-sep 07:44-08:44 y
+  16:53. Con esa imagen hubo detecciones fijas en un punto (abajo, algo a la
+  derecha) y una ficha a las 02:30: probablemente algo quieto que toma por
+  persona (sin comprobar).
+- **Personal probable** cada tramo (p. ej. `e1c0cd0f` 43 entradas en 2 h el
+  29-sep; `31e27475` 22 en 25 min el 30-sep). Deducción, no visto.
+
+**Rendimiento (telemetría, cámara 3 en vivo, GPU 1):** el servidor tarda
+siempre **~55-60 ms** por imagen; el ciclo, **~6 fps el 29-sep** (~110 ms
+fuera del servidor) y **4,2-4,9 fps la tarde del 30-sep** (~150-180 ms
+fuera). No se sabe de dónde salen esos 40-70 ms de más. Tamaño de la
+imagen frente a velocidad (experimentos naturales, NO limpios):
+
+| Imagen | KB | fps | fuera del servidor |
+|---|---:|---:|---:|
+| ventana de iVMS minimizada | 1 | ~25 | ~28 ms |
+| vacía (29-sep) | 17 | ~22 | ~35 ms |
+| oscura de noche | 37 | ~9 | ~54 ms |
+| buena | ~245 | 4-6 | 110-190 ms |
+
+**El dibujo del cliente con Supervision** (medido en el i5-11400 de este
+servidor, sin Qt): ~22 ms, y ~55 ms con el mapa de calor en vivo. **Pero el
+cliente de la tienda no tiene Supervision** (hallazgo 31): dibuja con
+QPainter, sin medir.
+
 ### 5.7 Precisión: NO está medida
 
 No existe una cifra de acierto de género ni de edad, y **no se debe
@@ -531,7 +615,15 @@ recortes a mano**: con 30 etiquetas, un 80 % medido es 63-90 %; con 100,
 9. **El vídeo no es la tienda**: otra compresión y **otro método de captura**
    (el reproductor es una app con GPU: modo lento de `PrintWindow`).
 10. **La GPU es compartida**: una medida de fps en dos momentos distintos
-    puede mezclar la carga ajena. Compara en la misma GPU y seguido.
+    puede mezclar la carga ajena. Compara en la misma GPU y seguido. **Y la
+    RAM y el disco también** (sección 1, trampas): el 30-sep el ciclo bajó
+    de ~6 a ~4 fps con el servidor igual de rápido.
+11. **Minimizar la ventana de iVMS deja la captura vacía** (imágenes de 1 KB,
+    «sin señal»; 30-sep 16:28-16:30). Tapada por otra ventana suele seguir
+    capturando (sin comprobar con iVMS).
+12. **Revisar grabaciones en la MISMA ventana de iVMS que captura un
+    recuadro con la IA encendida** podría contarlas como si fueran en vivo.
+    Para revisar: apagar la IA de ese recuadro u otra ventana.
 
 ---
 
@@ -555,6 +647,8 @@ Antes de citar uno, **comprueba que el código sigue igual**.
 | 29 | Dashboard inalcanzable desde el navegador de Windows (sección 1) | del montaje |
 | 30 | **La ruta de captura de ventana no tiene red de seguridad**: si una respuesta se pierde, el recuadro no vuelve a enviar hasta reconectar (`render_box_captura.py:574`; la ruta DVR sí libera a los 10 s, `render_box.py:583-589`). Hoy casi no pasa (un frame en vuelo); con dos en vuelo sí | vivo (cliente) |
 | 14 | `_best_in_gallery` es O(N) en Python; con el TTL ya no urge | vivo |
+| 31 | **El mapa de calor, las estelas y la elipse del recuadro no hacen nada sin Supervision**, y el cliente de la tienda NO lo tiene (`ModuleNotFoundError` en su `venv`, comprobado por el usuario el 30-sep). Las opciones aparecen y no avisan (`render_box.py:296-305`, `:1356-1363`); se dibuja con QPainter. Supervision queda fuera a propósito (`requirements-cliente.txt:25-28`). Los comentarios de `render_box.py:316-318` y `:1370` dicen que «el servidor pinta», pero eso solo pasa en el modo clásico | pendiente de revisar (cliente); detalle en `informes/Pendientes_Rendimiento.md`, n.º 17 (local, fuera de git) |
+| 32 | **`print()` de depuración en CADA frame** (`tiendas.py:2192-2193`, «📍 ROI actualizado», y `:2371-2372`): llenan la consola (~2 MB/h, sin rotación). Hipótesis SIN comprobar: con el disco lleno, un `print` que falla rompería cada frame (eso explicaría la imagen pegada del 30-sep); al probarlo ya había espacio | vivo (servidor) |
 | 2, 5, 6, 7, 3, 9, 10, 12, 17, 23 | Jarvis, errores que el cliente nunca ve, DVR por IP, `main.spec`, aforo, Stand, polling `/vlm/model`, `site_id` | menores o aplazados |
 
 ---
@@ -565,10 +659,19 @@ Antes de citar uno, **comprueba que el código sigue igual**.
    abierta: 20-30 min con `ELDE_ANAQUELES_GRABAR` y `ELDE_ANAQUELES_DIAG`,
    revisar **en imagen** cada agarre contado (buscar falsos: tocarse la cara,
    braceo al pasar) y la telemetría de fps. Si da falsos, volver a los valores
-   de antes en el YAML.
-2. **Rendimiento del ciclo** (sección 9): medir en el servidor el tiempo de
-   viaje de cada foto con `header.timestamp`; en el cliente, telemetría y las
-   dos mejoras.
+   de antes en el YAML. **Primeros datos (29-30 sep, cámara 3 en vivo):** de
+   15:00 a 17:03 del 29-sep, 8 visitas y 0 agarres; el 30-sep a las 16:24:17
+   (Venezuela), AGARRE #1 en Anaquel 2 → «colcafe», **revisado en la
+   grabación de iVMS por el usuario: real y producto correcto**. AGARRE #2
+   (17:38:28, A2, sin producto): sin grabación, no verificable. 1 verificado
+   de 1; poca muestra todavía. **El usuario no siempre tiene grabación en
+   iVMS**: para verificar cada agarre hará falta `ELDE_ANAQUELES_GRABAR`
+   (fotos de clientes, ~2,4 GB por 40 min; pedir permiso y mirar el disco).
+2. **Rendimiento del ciclo** (sección 9): el **paso 0 es la telemetría del
+   cliente**; sin ella no se puede repartir el tiempo de fuera del servidor.
+   Lista completa, de fácil a difícil, en `informes/Pendientes_Rendimiento.md`
+   (local). Ya hecho el 30-sep: telemetría de descartes reales (sección 1) y
+   correcciones de este archivo.
 3. **Estimar la mano con codo → muñeca** para el reparto por producto; medirlo
    con el vídeo de referencia (la clienta coge **Coffee-mate**).
 4. **Aflojar el listón de consolidación y MEDIRLO** (causa n.º 1 de no
@@ -582,6 +685,10 @@ Antes de citar uno, **comprueba que el código sigue igual**.
 10. **Decisiones del usuario:** clasificados sin identidad en el dashboard;
     qué es «visitante» con el TTL; destino de las ramas (¿PR a `main`?).
 11. Hallazgo 21, vocabularios de edad, el «??», hallazgo 24.
+12. **Hallazgo 31 (30-sep): mapa de calor y estelas del recuadro sin
+    Supervision.** Decidir entre avisar/ocultar las opciones, instalarlo o
+    llevar el cálculo al servidor. La lista de rendimiento completa está en
+    `informes/Pendientes_Rendimiento.md` (local, fuera de git).
 
 ---
 
@@ -603,7 +710,8 @@ después. **Avísale de que el fichero solo se completa al cerrar el cliente.**
   recomienda.** No lo repitas salvo para otra cosa.
 - **La ruta que importa es la de captura de ventana** (`render_box_captura.py`
   en `packages/elde_core`, el mixin que usa `render_box.py`): por ahí van iVMS
-  y el vídeo. La ruta DVR (`render_box.py:582-646`) hoy no se usa.
+  y el vídeo. La ruta DVR (`_on_dvr_frame`, `render_box.py:561-646`) hoy no
+  se usa.
 
 ### Tarea 1 — Medir el ciclo en el cliente (lo primero)
 
@@ -631,13 +739,21 @@ después. **Avísale de que el fichero solo se completa al cerrar el cliente.**
 
 ### Tarea 2 — Mejora pequeña: mandar al instante la última captura
 
-Hoy, al llegar la respuesta, se pone `can_send_next_frame = True`
-(`render_box.py:1845`) y se espera la **siguiente** captura; las que llegaron
-mientras tanto ya se tiraron (`render_box_captura.py:506-511`).
+Hoy, al llegar la respuesta, se dibuja y después se pone
+`can_send_next_frame = True` (`render_box.py:1845`), y se espera la
+**siguiente** captura; las que llegaron mientras tanto ya se tiraron
+(`render_box_captura.py:506-511`).
 
 **Propuesta:** en `loop_show_result`, cuando no se puede enviar, **guardar el
 último frame** (`header`, `image_bytes`) en vez de tirarlo; al llegar la
-respuesta, si hay uno guardado sin enviar, **mandarlo ya**. Ojo: una llamada
+respuesta, si hay uno guardado sin enviar, **mandarlo ya, ANTES de dibujar**,
+y dibujar después con una copia del frame de ESA respuesta (enviar
+sobrescribe `_pending_frame_bytes`). **Evaluado el 30-sep: mover solo
+`can_send_next_frame = True` antes del dibujo NO adelanta nada**: todo va en
+el hilo de Qt, el siguiente envío solo sale del aviso de captura nueva
+(`render_box.py:1435`) y ese aviso no se atiende hasta que termina el
+dibujo. Con la tarea 2 sin «enviar antes de dibujar», el dibujo queda
+entero dentro del ciclo. Ojo: una llamada
 recursiva a `loop_show_result` se quitó por reentrancia (comentario en
 `render_box_captura.py:583-585`): programarlo con `QTimer.singleShot(0, …)`.
 **Esperado (estimado): ~−25 ms por ciclo, de ~5 a ~5,7 fps.** Medir con la
@@ -654,7 +770,8 @@ tarea 1 y con las líneas `FPS` del servidor.
    (uno procesándose, otro esperando), pero el contador tiene que **caducar**
    cada frame pendiente (p. ej. 2 s), no esperar los 10 s de la red de
    seguridad (`render_box_captura.py` / `render_box.py:583-589`). La
-   telemetría del servidor dice `descartados=N`. **Ojo: la ruta de ventana
+   telemetría del servidor dice `descartados=N` (reemplazos reales desde el
+   30-sep; antes era una resta, sección 1). **Ojo: la ruta de ventana
    NO tiene red de seguridad**: solo la ruta DVR libera tras 10 s
    (`render_box.py:583-589`); en `render_box_captura.py:574` una respuesta
    perdida deja el recuadro sin enviar hasta reconectar (hallazgo 30).
@@ -681,6 +798,23 @@ tramo del agarre del vídeo, ~5,0 fps a 1456 px en la GPU 1).
   capturas; con la IA encendida no se ve el ritmo de captura. Mostrar ambos.
 - **Productos en el panel** (hallazgo 26): necesita que el servidor los meta
   en el bloque en vivo; coordinarlo (lo puede hacer la sesión del Linux).
+- **Mapa de calor / estelas / elipse sin Supervision** (hallazgo 31): el
+  cliente de la tienda no lo tiene y esas opciones no hacen nada. Mínimo:
+  avisar u ocultarlas. Instalarlo haría el dibujo más pesado y choca con
+  `opencv-contrib-python`.
+
+### Lo que la sesión del Linux averiguó del cliente el 30-sep (leyendo código)
+
+- La captura pone **`time.sleep(1 / 60)` en cada vuelta**
+  (`capture_worker.py:315`, sin comentario). Candidata a quitar o reducir,
+  midiendo antes y después.
+- **Todo el recorrido de las imágenes va en el hilo de la ventana**, para
+  todas las cámaras (lectura del tubo, envío, respuesta, dibujo).
+- **Cada recuadro recibe todas las respuestas** y descarta las ajenas
+  (`render_box.py:368`, `:1767-1776`).
+- El dibujo sin Supervision (`render_box.py:1653-1686`): abrir el JPEG con
+  Qt, rectángulos, escalar con suavizado. **Sin medir**: inclúyelo en la
+  telemetría (`t_pintado`).
 
 ### Cómo probar con el usuario
 
@@ -733,6 +867,17 @@ tramo del agarre del vídeo, ~5,0 fps a 1456 px en la GPU 1).
     dijo que no). Formula como hipótesis y mide.
 16. **Dar rutas de ejemplo en comandos** (`C:\ruta\a\...`): el usuario las
     copia tal cual.
+17. **Leer `descartados` de la telemetría como frames perdidos** (29-30 sep):
+    era la resta recibidos − procesados de cada periodo, y acabó escrito en
+    este archivo y en dos informes. Se deshizo mirando la fuente: el aviso
+    `ColaUltimoFrame` no salía desde el 17-sep. Antes de interpretar un
+    contador, lee cómo se calcula (`telemetria_fps.py`) y contrástalo con
+    otra señal, como pide el error 6.
+18. **Proponer un cambio sin mirar el modelo de hilos** (30-sep): se apuntó
+    «desbloquear el envío antes de dibujar» como mejora fácil; en un solo
+    hilo de Qt no adelanta nada (sección 9, tarea 2). Y se citaron líneas de
+    una función que nadie llama (`update_tracks`, en vez de
+    `_update_tracks_botsort`): comprueba que el código citado se ejecuta.
 
 Método que sí funciona: **verificar las pruebas al revés** (desactiva el
 arreglo en memoria, comprueba que falla, restáuralo) y **reproducir
