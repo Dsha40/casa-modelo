@@ -99,7 +99,10 @@ class ColaUltimoFrame:
     def __len__(self) -> int:
         return len(self._items)
 
-    def poner(self, item: ItemFrame) -> None:
+    def poner(self, item: ItemFrame) -> bool:
+        """Encola `item`. True si REEMPLAZÓ un frame sin procesar de su
+        cámara: el drenador lo anota en la telemetría, que hasta el 30-sep
+        adivinaba los descartes restando recibidos menos procesados."""
         if item.camera_id in self._items:
             self.descartados += 1
             if self.descartados in (1, 10, 100) or self.descartados % 1000 == 0:
@@ -107,10 +110,13 @@ class ColaUltimoFrame:
                     "ColaUltimoFrame: %d frame(s) reemplazados sin procesar "
                     "(camara %s). El cliente envia mas rapido de lo que se "
                     "procesa.", self.descartados, item.camera_id)
+            reemplazo = True
         else:
             self._orden.append(item.camera_id)
+            reemplazo = False
         self._items[item.camera_id] = item
         self._evento.set()
+        return reemplazo
 
     async def sacar(self) -> ItemFrame:
         """Espera hasta que haya algo y devuelve el frame más antiguo en turno."""
@@ -174,7 +180,8 @@ class DrenajeCliente:
         if not self._stopped:
             telemetria_fps.anotar_recibido(
                 item.camera_id, telemetria_fps.tamano_de_payload(item.payload))
-            self.cola.poner(item)
+            if self.cola.poner(item):
+                telemetria_fps.anotar_descartado(item.camera_id)
 
     # -- La tarea ---------------------------------------------------------
     async def _run(self) -> None:

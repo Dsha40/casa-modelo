@@ -37,9 +37,9 @@ def _item(camera_id, marca, **kwargs):
 def test_conserva_solo_el_frame_mas_reciente_de_cada_camara():
     async def caso():
         cola = ColaUltimoFrame()
-        cola.poner(_item('cam1', 'viejo'))
-        cola.poner(_item('cam2', 'unico'))
-        cola.poner(_item('cam1', 'nuevo'))       # reemplaza a 'viejo'
+        assert cola.poner(_item('cam1', 'viejo')) is False
+        assert cola.poner(_item('cam2', 'unico')) is False
+        assert cola.poner(_item('cam1', 'nuevo')) is True   # reemplaza a 'viejo'
         assert len(cola) == 2
         assert cola.descartados == 1
         primero = await cola.sacar()
@@ -101,6 +101,26 @@ async def _espera(condicion, timeout=2.0):
 
 
 # ── DrenajeCliente ───────────────────────────────────────────────────────
+def test_encolar_anota_en_la_telemetria_solo_los_reemplazos(monkeypatch):
+    """La telemetría cuenta como descartado lo que la cola REEMPLAZÓ, y nada
+    más (30-sep-2026): antes restaba recibidos − procesados y daba por
+    perdido el frame en vuelo que cerraba cada periodo."""
+    from src.app import telemetria_fps as tf
+    monkeypatch.setattr(tf.time, 'monotonic', lambda: 1000.0)   # sin volcado
+    monkeypatch.setattr(tf, '_por_camara', {})
+    monkeypatch.setattr(tf, '_desde', 1000.0)
+
+    async def caso():
+        d = _drenador(_WebsocketFalso(), executor=None)          # sin start()
+        d.encolar(_item('cam1', 'a'))
+        d.encolar(_item('cam2', 'b'))
+        d.encolar(_item('cam1', 'c'))           # reemplaza a 'a' sin procesar
+        return {r['camera_id']: r for r in tf.resumen()}
+    por_cam = asyncio.run(caso())
+    assert por_cam['cam1']['descartados'] == 1
+    assert por_cam['cam2']['descartados'] == 0
+
+
 def test_procesa_y_responde_sin_que_nadie_espere():
     async def caso():
         with ThreadPoolExecutor(max_workers=1) as executor:

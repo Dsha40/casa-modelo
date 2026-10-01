@@ -20,12 +20,27 @@ Una línea por cámara cada `PERIODO_S` en el log:
   ocupa ~63: el resto pasa FUERA, y cada frame de iVMS pesa ~300 KB por un
   túnel SSH. Si los KB/s se quedan planos aunque cambien el tamaño o los
   fps, el techo es la conexión, no la GPU.
-- `procesados`: frames que pasaron por el pipeline (la cola se queda solo
-  con el último por cámara; la diferencia son los `descartados`).
+- `procesados`: frames que pasaron por el pipeline.
+- `descartados`: frames que la cola REEMPLAZÓ sin procesar (se queda solo
+  con el último por cámara; lo anota `DrenajeCliente.encolar`). Con el
+  cliente sano, que espera cada respuesta antes de mandar otra, es 0.
 - `proceso`: mediana/p90 del tiempo en el servidor por frame (decodificar,
   inferir y armar la respuesta), sin contar la red ni al cliente. Si se
   acerca al intervalo entre frames, el cuello es el servidor; si es mucho
   menor, el cliente está esperando por otra cosa.
+
+## `descartados` era una resta, y mentía (30-sep-2026)
+
+Hasta el 30-sep valía `recibidos - procesados` del periodo. Un frame que
+llega al final de un periodo y se procesa al principio del siguiente es un
+frame EN VUELO, no uno perdido, pero contaba como descartado —pasa cuando
+el que cierra el periodo es un frame recién recibido—: la tarde del 29-sep
+dijeron «descartados=1» 70 de las 246 líneas de la cámara 3 real, mientras
+el aviso de `ColaUltimoFrame` —que salta con el PRIMER reemplazo— no ha
+vuelto a aparecer en el log desde el 17-sep. Se leyó como pérdida de frames
+en el CLAUDE.md y en dos informes. Ahora se cuenta el reemplazo de verdad.
+Un frame cuyo proceso falla tampoco es un descarte: sale en el log como
+«Error procesando frame».
 
 Nunca lanza: medir no puede costar un frame.
 """
@@ -52,7 +67,7 @@ def _cam(camera_id: Any) -> Dict[str, Any]:
     c = _por_camara.get(clave)
     if c is None:
         c = _por_camara[clave] = {'recibidos': 0, 'procesados': 0,
-                                  'ms': [], 'bytes': 0}
+                                  'descartados': 0, 'ms': [], 'bytes': 0}
     return c
 
 
@@ -101,6 +116,15 @@ def anotar_procesado(camera_id: Any, ms: float) -> None:
         pass
 
 
+def anotar_descartado(camera_id: Any) -> None:
+    """Un frame de `camera_id` reemplazado en la cola sin procesar."""
+    try:
+        with _lock:
+            _cam(camera_id)['descartados'] += 1
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
 def resumen(reiniciar: bool = False) -> List[Dict[str, Any]]:
     """Las cifras del periodo en curso, por cámara."""
     global _desde
@@ -115,7 +139,7 @@ def resumen(reiniciar: bool = False) -> List[Dict[str, Any]]:
                 'segundos': round(lapso, 1),
                 'recibidos_s': round(c['recibidos'] / lapso, 2),
                 'procesados_s': round(c['procesados'] / lapso, 2),
-                'descartados': max(0, c['recibidos'] - c['procesados']),
+                'descartados': c['descartados'],
                 'proceso_ms_mediana': (round(ms[len(ms) // 2], 1)
                                        if ms else None),
                 'proceso_ms_p90': (round(ms[int(len(ms) * 0.9)], 1)
