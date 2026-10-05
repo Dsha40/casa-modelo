@@ -121,6 +121,29 @@ def test_encolar_anota_en_la_telemetria_solo_los_reemplazos(monkeypatch):
     assert por_cam['cam2']['descartados'] == 0
 
 
+def test_el_proceso_se_cronometra_con_el_reloj_fino(monkeypatch):
+    """El «proceso» de la telemetría se mide con perf_counter (5-oct-2026):
+    con monotonic, en Windows, salía a saltos de ~15,6 ms."""
+    from src.app import telemetria_fps as tf
+    from src.app import ws_drenaje as wd
+    anotados = []
+    monkeypatch.setattr(tf, 'anotar_procesado',
+                        lambda cam, ms: anotados.append((cam, ms)))
+    marcas = iter([10.0, 10.0123])
+    monkeypatch.setattr(wd.time, 'perf_counter', lambda: next(marcas, 10.0123))
+
+    async def caso():
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            d = _drenador(_WebsocketFalso(), executor)
+            d.start()
+            d.encolar(_item('cam1', 'f1'))
+            await _espera(lambda: d.enviados == 1)
+            await d.stop()
+    asyncio.run(caso())
+    assert anotados and anotados[0][0] == 'cam1'
+    assert abs(anotados[0][1] - 12.3) < 1e-6
+
+
 def test_procesa_y_responde_sin_que_nadie_espere():
     async def caso():
         with ThreadPoolExecutor(max_workers=1) as executor:

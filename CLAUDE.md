@@ -1,7 +1,8 @@
 # CLAUDE.md — ELDE Tiendas (contexto de trabajo)
 
 Traspaso de las sesiones del 16-18, 21-22, 23, 24, 25, 28, 29 y **30 de
-septiembre de 2026** (actualizado el 1-oct). **Este archivo SÍ se commitea**: vive en la rama para
+septiembre de 2026** (actualizado el 1-oct; **secciones 12 y 13 añadidas el
+2 y el 5-oct por la sesión del CLIENTE**). **Este archivo SÍ se commitea**: vive en la rama para
 que la siguiente sesión lo lea sin que el usuario tenga que pegarlo.
 
 **Rama actual: `feature/anaquel`** (publicada). Cuelga de `fix/gender` →
@@ -11,8 +12,13 @@ que la siguiente sesión lo lea sin que el usuario tenga que pegarlo.
 **Hay DOS sesiones de Claude en paralelo:** una en el Linux del usuario, junto
 al servidor, y otra en el **cliente** de Windows. No se ven entre ellas: solo
 comparten lo que quede commiteado aquí. La del cliente tiene su encargo en la
-**sección 9** (reescrita el 29-sep). Hasta el 29-sep la sesión del cliente no
-había subido nada al remoto.
+**sección 9** (reescrita el 29-sep). La sesión del cliente **sigue sin subir
+nada al remoto**: el 5-oct tiene commits locales sin push (13.1).
+
+> **¿Eres la próxima sesión del CLIENTE (Windows)? Empieza por la sección
+> 13** (2 y 5 de oct): el estado del código, lo medido y lo pendiente. La 12
+> (1-2 oct) sigue valiendo como contexto, pero su lista 12.6 ya está casi
+> toda hecha o recogida en 13.10.
 
 **Donde este archivo dé una cifra, mira su fecha.** Las cifras de horas o días
 de producción mandan sobre las de minutos de vídeo.
@@ -125,12 +131,13 @@ crear contenedores.
 | Lanzar SOLO el cliente | PowerShell **como Administrador** (iVMS corre elevado y sin admin no se captura su ventana): `cd "C:\Users\DESARROLLO-7\Desktop\Supermercado\clients\tienda"` y `.\venv\Scripts\python.exe src\main.py` |
 | `INICIAR_TIENDA.bat` | se relanza como Administrador (**pierde las variables de entorno** que pongas antes) y **arranca también un servidor en Windows** además del cliente. Para pruebas con variables, lanzar solo el cliente |
 
-### Hay dos servidores posibles
+### Hay tres servidores posibles
 
 | | Dónde | Cómo se llega |
 |---|---|---|
 | **El del contenedor** | lo arranca Claude o el usuario aquí | `localhost:9000` desde Windows (túnel) |
 | **El de `pop-os`** | en el anfitrión | `72.68.60.141:9000`. **Código desconocido y NO escribe en nuestro log** |
+| **El del PC del cliente** (desde el 1-oct) | Windows `DESKTOP-9LHHJI2`: Quadro RTX 4000 8 GB, i5-6500 (4 hilos), 11,9 GB de RAM | `localhost:9000` en el propio PC, sin túnel. Arrancar desde `server\` con `.\venv\Scripts\python.exe -u iniciar_servidor_headless.py 9000`. **No usar `INICIAR_TIENDA.bat`: mata lo que escucha en el 9000, túnel de VS Code incluido.** Su log está en Windows, no aquí (según el informe de la sesión del cliente del 1-oct) |
 
 ### Arrancar y parar el servidor (así, desde el 30-sep)
 
@@ -208,7 +215,9 @@ cd server && ELDE_TIENDA_DB=<scratchpad>/tienda_pruebas.db PYTHONPATH=<scratchpa
 ```
 
 **Línea base (30-sep): `852 passed, 16 skipped, 2 xfailed`.** Si ves un
-`failed`, es tuyo. Las de `packages/elde_core` necesitan PySide6: aquí no
+`failed`, es tuyo. **En el PC de Windows** (5-oct): `876 passed, 15
+skipped, 1 xfailed` con el código de la sección 13; la diferencia de
+skipped/xfailed con Linux ya estaba antes de esos cambios (sección 13.2). Las de `packages/elde_core` necesitan PySide6: aquí no
 corren; las que nombran a otros clientes (`clients/amazonas`, `detecciones`,
 `perimetrales`) fallan siempre porque esas carpetas no existen en este corte.
 
@@ -437,6 +446,8 @@ clasificaciones,capturas}`, `/api/anaqueles/<cámara>/resumen`,
 | `b303013` | ídem | **telemetría de fps por cámara** en el log (recibidos, procesados, tiempo de proceso, KB/s) |
 | `c690a86` | ídem | **agarres en baldas altas**: `pose_cercania` + `extremo` (encendidas en el YAML), diagnóstico (`ELDE_ANAQUELES_DIAG`) y grabador (`ELDE_ANAQUELES_GRABAR`); dos opciones probadas y quitadas |
 | `8994ba8` | ídem | **`descartados` de la telemetría = reemplazos reales de la cola** (antes, una resta que contaba el frame en vuelo) |
+| `c2f96e5` | ídem (5-oct, **sin push**) | **imagen del detector preparada en la GPU** (`imagen_a_gpu.py`): 5,22 → 7,71 fps en el PC de la tienda (sección 13.5) |
+| «Cronometrar el proceso con el reloj fino…» (el commit siguiente a `c2f96e5`) | ídem (5-oct, **sin push**) | **reloj fino** (`perf_counter`) para el «proceso» de la telemetría: resuelve el hallazgo 34 |
 
 ---
 
@@ -502,11 +513,16 @@ por la medición** (aceleran una GPU que no es el cuello).
 
 **Lo que se concluye (y con qué seguridad):**
 
-1. **La GPU no es el cuello** (medido): de un ciclo de ~164-200 ms el servidor
+1. **La GPU no es el cuello** (medido **en Linux**; en el PC de Windows el
+   cuello es la CPU, 13.4): de un ciclo de ~164-200 ms el servidor
    trabaja 63-80. Podría con ~12-15 fps por cámara.
 2. **La conexión no está llena** (medido): con fotos a la mitad, los KB/s
    bajaron un 40 % y los fps solo subieron un 30 %. Si la subida fuera el
    techo, los KB/s se habrían mantenido y los fps casi duplicado.
+   **⚠️ Corregido el 1-oct: «no está llena» NO quiere decir «no frena».**
+   Con una sola imagen en vuelo, lo que tarda en subir cada imagen se suma
+   entero al ciclo, aunque la conexión pase la mitad del tiempo ociosa. Ver
+   5.9: los datos apuntan a que el túnel cuesta sobre todo **por tamaño**.
 3. **Reducir a 960 px NO compensa**: +30 % fps a cambio de más caras perdidas
    (rechazos de cara 97 → 139; «sin rostro» 2 → 7 de 12 fichas; muestra
    pequeña, orientativo).
@@ -591,6 +607,39 @@ servidor, sin Qt): ~22 ms, y ~55 ms con el mapa de calor en vivo. **Pero el
 cliente de la tienda no tiene Supervision** (hallazgo 31): dibuja con
 QPainter, sin medir.
 
+### 5.9 Servidor en el PC del cliente (1-oct) y qué frena el túnel
+
+**Según el informe de la sesión del cliente** (local en Windows:
+`informes\informe_2026-10-01_servidor_en_windows.md`; **no medido por la
+sesión del Linux**):
+
+- Con el servidor en el mismo PC: **7,3-8,1 fps** con iVMS en vivo (solo
+  ~1,5 min) y **5,4 fps** con el vídeo en Media Player (17,5 min, 5.649
+  frames sin errores). El servidor tarda **94-125 ms** por imagen: la GPU es
+  más lenta (el detector, 39,5 ms de GPU de 46,7) y la CPU va al **98 %**,
+  porque la comparten el servidor, el cliente, iVMS y Media Player.
+- **Primera medida del cliente por dentro** (telemetría del ciclo): dibujar
+  con QPainter **18 ms**, esperar la siguiente captura **10 ms** (no 25),
+  captura → cliente 3 ms, enviar 0,6 ms. **El cliente suma ~30 ms.**
+- Su reloj del «proceso» iba a saltos de 15,6 ms en Windows (hallazgo 34,
+  resuelto en el commit del reloj fino).
+
+**Qué frena el túnel (deducido por la sesión del Linux, 1-oct):** la sesión
+del cliente dedujo ~85-105 ms **fijos por viaje**. **No encaja** con la
+tabla de 5.8: con imágenes de 1-17 KB, TODO el tiempo fuera del servidor
+eran 28-35 ms. Si cada viaje costara 85-105 ms fijos, ni las imágenes
+diminutas bajarían de ahí. Lo que encaja es **un coste por tamaño**: subir
+cada imagen por el camino hasta `pop-os`, por internet o VPN. Estimación
+con 4 puntos, sin prueba limpia: **~0,3 ms por KB, unos 3 MB/s (~25
+Mbit/s)**, más unos ~28 ms fijos.
+
+**Cómo decidirlo** (cliente conectado al servidor de Linux por el túnel):
+1. **Coste fijo por viaje:** en PowerShell, 20 veces
+   `curl.exe -s -o NUL -w "%{time_total}\n" http://localhost:9000/health`.
+2. **Coste por tamaño:** telemetría del cliente con `CAPTURE_MAX_WIDTH`
+   1600, 960 y 640, en tramos de 3 min seguidos. Ida y vuelta menos el
+   «proceso» del servidor de Linux (reloj fino), frente a los KB por imagen.
+
 ### 5.7 Precisión: NO está medida
 
 No existe una cifra de acierto de género ni de edad, y **no se debe
@@ -649,6 +698,7 @@ Antes de citar uno, **comprueba que el código sigue igual**.
 | 14 | `_best_in_gallery` es O(N) en Python; con el TTL ya no urge | vivo |
 | 31 | **El mapa de calor, las estelas y la elipse del recuadro no hacen nada sin Supervision**, y el cliente de la tienda NO lo tiene (`ModuleNotFoundError` en su `venv`, comprobado por el usuario el 30-sep). Las opciones aparecen y no avisan (`render_box.py:296-305`, `:1356-1363`); se dibuja con QPainter. Supervision queda fuera a propósito (`requirements-cliente.txt:25-28`). Los comentarios de `render_box.py:316-318` y `:1370` dicen que «el servidor pinta», pero eso solo pasa en el modo clásico | pendiente de revisar (cliente); detalle en `informes/Pendientes_Rendimiento.md`, n.º 17 (local, fuera de git) |
 | 32 | **`print()` de depuración en CADA frame** (`tiendas.py:2192-2193`, «📍 ROI actualizado», y `:2371-2372`): llenan la consola (~2 MB/h, sin rotación). Hipótesis SIN comprobar: con el disco lleno, un `print` que falla rompería cada frame (eso explicaría la imagen pegada del 30-sep); al probarlo ya había espacio | vivo (servidor) |
+| 33 | **Cada cámara carga SU PROPIA copia de ViTPose** (comprobado el 1-oct leyendo el código): cada `PoseMunecas` pide motor (`anaqueles_pose.py:123`) y `crear_motor_pose` crea uno nuevo cada vez (`pose_motor.py:174-199`), que carga su modelo. Con N cámaras, N copias en la GPU y un parón de carga por cámara (18 s en Windows; 4-53 s en Linux). El detector sí se comparte (`deteccion_compartida.py`) | vivo (servidor); arreglo: compartir el motor como el detector |
 | 2, 5, 6, 7, 3, 9, 10, 12, 17, 23 | Jarvis, errores que el cliente nunca ve, DVR por IP, `main.spec`, aforo, Stand, polling `/vlm/model`, `site_id` | menores o aplazados |
 
 ---
@@ -667,11 +717,12 @@ Antes de citar uno, **comprueba que el código sigue igual**.
    de 1; poca muestra todavía. **El usuario no siempre tiene grabación en
    iVMS**: para verificar cada agarre hará falta `ELDE_ANAQUELES_GRABAR`
    (fotos de clientes, ~2,4 GB por 40 min; pedir permiso y mirar el disco).
-2. **Rendimiento del ciclo** (sección 9): el **paso 0 es la telemetría del
-   cliente**; sin ella no se puede repartir el tiempo de fuera del servidor.
-   Lista completa, de fácil a difícil, en `informes/Pendientes_Rendimiento.md`
-   (local). Ya hecho el 30-sep: telemetría de descartes reales (sección 1) y
-   correcciones de este archivo.
+2. **Rendimiento del ciclo:** la telemetría del cliente ya existe (12.4, sin
+   commitear) y el reparto está medido en el PC de Windows (12.2 y 13.4-13.8).
+   Hecho el 5-oct: imagen del detector en la GPU (`c2f96e5`), reloj fino
+   (el commit del reloj fino) y mapa de calor bajo pedido (13.6). Lo que queda, en 13.10.
+   Lista vieja, de fácil a difícil, en `informes/Pendientes_Rendimiento.md`
+   (local, en Linux).
 3. **Estimar la mano con codo → muñeca** para el reparto por producto; medirlo
    con el vídeo de referencia (la clienta coge **Coffee-mate**).
 4. **Aflojar el listón de consolidación y MEDIRLO** (causa n.º 1 de no
@@ -689,6 +740,17 @@ Antes de citar uno, **comprueba que el código sigue igual**.
     Supervision.** Decidir entre avisar/ocultar las opciones, instalarlo o
     llevar el cálculo al servidor. La lista de rendimiento completa está en
     `informes/Pendientes_Rendimiento.md` (local, fuera de git).
+13. **Del 1-oct:**
+    - **Compartir ViTPose entre cámaras** (hallazgo 33).
+    - **La prueba de qué frena el túnel** (5.9).
+    - En el PC de Windows: **vigilar la RAM** (llegó a 420 MB libres) **y el
+      disco** (bajó de 21 a 13 GB libres). El 5-oct: el disco baja 2-3,5 GB
+      al cargar ViTPose y vuelve al apagar (13.9).
+    - **Antes de proponer TensorRT o fp16:** `ENABLE_TENSORRT` solo afecta a
+      los modelos ONNX (caras, ropa, edad; `tiendas_modelos.py:110-113`),
+      **no al detector RF-DETR**, que va en PyTorch. Y el fp16 del detector
+      solo se lee de la configuración de `vigilante_amazonas`
+      (`deteccion_compartida.py:66-86`): aquí hace falta cambiar código.
 
 ---
 
@@ -703,7 +765,7 @@ después. **Avísale de que el fichero solo se completa al cerrar el cliente.**
 
 - El ciclo completo es de **~164-200 ms** con una cámara (5-6 fps); el
   servidor trabaja **63-80 ms** de ese tiempo (sección 5.4). **Ni la GPU ni la
-  conexión son el techo.**
+  conexión son el techo** (en Linux; en Windows, la CPU: 13.4).
 - **El cliente espera la siguiente captura** después de cada respuesta
   (sección 3, paso 5): ~25 ms de media a 20 capturas/s.
 - **`CAPTURE_MAX_WIDTH=960`**: +30 % fps, pero más caras perdidas. **No se
@@ -714,6 +776,10 @@ después. **Avísale de que el fichero solo se completa al cerrar el cliente.**
   se usa.
 
 ### Tarea 1 — Medir el ciclo en el cliente (lo primero)
+
+**Estado (1-oct): hecha por la sesión del cliente, sin commitear todavía.**
+Resultados en 5.9. Datos en `%LOCALAPPDATA%\tienda_view\telemetria_ciclo.jsonl`
+del PC del cliente.
 
 **Qué:** en qué se van los ~100-120 ms que el ciclo pasa fuera del servidor.
 
@@ -756,8 +822,9 @@ dibujo. Con la tarea 2 sin «enviar antes de dibujar», el dibujo queda
 entero dentro del ciclo. Ojo: una llamada
 recursiva a `loop_show_result` se quitó por reentrancia (comentario en
 `render_box_captura.py:583-585`): programarlo con `QTimer.singleShot(0, …)`.
-**Esperado (estimado): ~−25 ms por ciclo, de ~5 a ~5,7 fps.** Medir con la
-tarea 1 y con las líneas `FPS` del servidor.
+**Esperado, con lo medido el 1-oct (5.9): ~−28 ms por ciclo**: ~10 ms de
+esperar la captura y ~18 ms de dibujo, si se envía antes de dibujar. Medir
+con la tarea 1 y con las líneas `FPS` del servidor.
 
 ### Tarea 3 — Mejora grande: dos fotogramas en vuelo
 
@@ -898,3 +965,509 @@ los mismos datos.
 - **No se usa ningún módulo de OpenCV contrib.**
 - **`informes/` es del usuario y no se commitea** (fotos de clientes). Lo
   útil de los informes está resumido en 5.1 y 5.6.
+
+---
+
+## 12. Sesión del CLIENTE en Windows (1-2 oct)
+
+Escrito el 2-oct por la sesión del cliente **para la siguiente sesión del
+cliente, aquí en Windows**. Todo está medido o leído en el PC
+`DESKTOP-9LHHJI2`, salvo lo marcado como **deducido**. **El código de esta
+sección NO está commiteado todavía** (lista de archivos en 12.4). Los
+informes citados viven en `informes\` **de Windows** (fuera de git).
+
+### 12.0 Para empezar (próxima sesión del cliente)
+
+1. **Lee la sección 0** y los cuatro archivos obligatorios, como siempre.
+2. **Tus herramientas de la sesión anterior** ya no están en tu scratchpad:
+   se copiaron a `informes\herramientas_cliente\`.
+
+   | Herramienta | Qué hace |
+   |---|---|
+   | `apagar_servidor.ps1` + `ctrl_c.py` | Apagar el servidor en orden |
+   | `correr_tests.py` + `stub\pytest.py` | Correr pruebas sin pytest (`$env:PYTHONPATH` apuntando a `stub`) |
+   | `analizar_telemetria.py` | Analizar la telemetría (`--desde HH:MM --hasta HH:MM`) |
+   | `monitor_recursos.ps1` | Registrar CPU, RAM y GPU |
+   | `estado_manana.ps1`, `cobertura.py` | Ver qué hay encendido y qué cubren los logs |
+   | `noche_por_hora.py`, `cifras_noche.py` | Las cifras de los informes |
+   | `cliente_prueba.py` | Un cliente de mentira |
+   | `banco_detector_gpu.py` | El banco del detector |
+3. **Mira qué hay encendido:** `/health` en `http://127.0.0.1:9000`
+   (`servidor_nombre = DESKTOP-9LHHJI2` es el servidor de este PC). El
+   cliente corre elevado: desde tu sesión **no puedes cerrarlo**; pídeselo al
+   usuario.
+4. **Lanzar el cliente como Administrador desde tu sesión:**
+   `Start-Process ...\clients\tienda\venv\Scripts\python.exe -ArgumentList 'src\main.py' -WorkingDirectory ...\clients\tienda -Verb RunAs`.
+   Sale el aviso de Windows y el usuario tiene que aceptarlo; la herramienta
+   puede quedarse esperando hasta entonces.
+5. **El usuario trabaja con la VPN puesta** para poder hablar contigo. Con
+   ella no se llega a pop-os directamente (12.5), pero el servidor de este PC
+   no la necesita.
+
+### 12.1 El servidor ya corre en el PC de la tienda
+
+- **`server\venv` rehecho el 1-oct.** El anterior heredaba el Python global
+  (`include-system-site-packages = true`), con torch 2.9.1 **solo CPU** y sin
+  `rfdetr`; quedó apartado en `server\venv_viejo_cpu`. El nuevo: Python
+  3.12.10, torch 2.8.0+cu128, onnxruntime-gpu 1.23.2, `opencv-contrib-python`
+  4.12.0.88 y `elde_core` editable. `verificar_entorno.py` sale con código 0.
+- **`easyocr` metió `opencv-python-headless` 5.0.0.93**: hubo que quitarlo,
+  como avisa el README. Si no, se cae el stack facial.
+- **Los pesos de Git LFS** (`rf-detr-medium.pth` y el de ViTPose) estaban
+  borrados en esa copia: se repusieron con `git restore` (386 y 328 MB).
+- **torch con internet malo:** pip falló dos veces (tope de 10 min de la
+  herramienta y cortes de red). Lo que funcionó: bajar el wheel con
+  `curl -C - --retry`, que reanuda; comprobar su SHA-256 contra el índice de
+  PyTorch; e instalarlo desde el disco con `--no-deps`. Después,
+  `-r requirements` ya lo da por instalado. Con `--find-links`, pip lo volvió
+  a bajar de internet.
+- **Arrancar:** desde `server\`,
+  `.\venv\Scripts\python.exe -u iniciar_servidor_headless.py 9000`, con la
+  salida a `server\logs\consola_*.log`. `/health` responde en 6-16 s; la
+  primera imagen tarda ~20 s (carga de RF-DETR); con la primera persona junto
+  a un estante, ViTPose tarda ~18 s **por cámara** (hallazgo 33, visto
+  también en la memoria de GPU: +0,5 GB con cada cámara nueva).
+- **Parar en orden en Windows** (lo que en Linux es `kill -TERM`): mandar
+  Ctrl+C a la consola del proceso desde otro python, con `AttachConsole` y
+  `GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)`. Se apaga en ~3 s y vuelca el
+  mapa de calor de la hora en curso («Application shutdown complete»).
+  `Stop-Process` lo mata sin volcar nada.
+- **Va en hora LOCAL**, no en UTC: el mapa de calor `…_16` son las 16h, y la
+  jornada del anaqueles cambia a medianoche de Venezuela.
+- **Recursos con una cámara:** el servidor ocupa 3-3,6 GB de RAM (de 11,9) y
+  2,2-2,7 GB de GPU (de 8). **La CPU (i5-6500, 4 hilos) va al 92-98 %**,
+  porque la comparten el servidor, el cliente, iVMS y Media Player; la GPU,
+  al 26-28 %.
+
+### 12.2 Rendimiento medido (una cámara)
+
+| Fuente | fps | Proceso en el servidor | Fuera del servidor |
+|---|---:|---:|---:|
+| Vídeo en Media Player (1-oct 13:05-13:23, 5.649 imágenes) | 5,4 | 110-125 ms | ~45-60 ms |
+| **iVMS en vivo, cámara 3** (1-oct 16:46-17:31, 17.270 imágenes) | **6,8** | **94 ms** | **~30 ms** |
+| iVMS en vivo, noche del 1 al 2-oct | 7,3-7,5 de día · 8,2 de noche (imagen oscura, 38 KB) | 94 · 79 ms | — |
+
+- **El cliente por dentro** (telemetría, iVMS en vivo): cada ciclo dura
+  122-125 ms. De ellos, la ida y vuelta al servidor son 97 ms, dibujar 14-15,
+  esperar la siguiente captura 7-9, y el resto ~1. **El cliente suma ~25 ms.**
+- **El detector solo** (banco aislado con el perfilador de torch):
+  `detectar()` tarda 46,7 ms, de ellos **39,5 ms de GPU** y 7,2 de CPU. En la
+  3090 Ti, el detector completo tarda 32-36 ms.
+- **La CPU ocupada por otros programas** (Media Player) añade 15-30 ms al
+  proceso: 94 → 110-125 ms, con ±15 ms de margen por el reloj (hallazgo 34,
+  resuelto el 5-oct en el commit del reloj fino).
+- **Lectura:** en este PC el cuello es el procesador compartido, más una GPU
+  más lenta. Con el túnel de Linux era la subida de cada imagen (5.9). Los
+  fps salen parecidos (~5-7).
+
+### 12.3 Resultados de la cámara 3 con el servidor en el PC
+
+Informes `informe_2026-10-01_tarde.md` e `informe_2026-10-02.md` (Windows).
+
+| Tramo (Venezuela) | Capturadas | Identificadas | Clasificadas | Anaqueles |
+|---|---:|---:|---:|---|
+| 1-oct 16:46-17:31 | 89 | 11,2 % | 5,6 % | 1 visita A2, 0 agarres |
+| 1-oct 18:02-20:48 | 397 | 17,1 % | 10,8 % | 11 visitas A2, **2 agarres** |
+| 2-oct 06:54-09:12 | 185 | 15,7 % | 7,0 % | 7 visitas A2, 0 agarres |
+
+- **Los dos agarres, sin revisar en iVMS:** 1-oct **18:34:16**, A2 →
+  **colcafe** (identidad `eaee3867`, mujer adulta según su ficha); y
+  **19:00:45**, A2, **sin producto** (`7994b019`, hombre de 26-35).
+- **El código corto del log** («visita #3 … (f93e)») son los 4 últimos
+  caracteres del pid (`_corto`, `anaqueles.py:1771`). Si es hexadecimal, es
+  una identidad y se encuentra en `tienda_capturas.person_uuid`; si son
+  cifras, es un `prov:<track>`.
+- **El anaqueles apunta el género del MOMENTO de la visita** (`_rasgos`,
+  `anaqueles.py:1338` y `:1349`). La ficha puede decidirlo después: por eso
+  la mayoría de las visitas sale «Desconocido».
+- **Personal probable** (deducido, no visto): `b2a68313`, 49 entradas en
+  2 h 27 min; `01c833f0`, el 14 % de toda la permanencia; `b5ef8905`,
+  reconocida 20 veces.
+- **Noche:** 1.175 seguimientos que solo dejaron 11 fichas, todas «sin
+  rostro», con la imagen a oscuras; y el anaqueles suspende el conteo cada
+  30 s (1.210 veces).
+
+### 12.4 Cambios en el código (SIN COMMITEAR al 5-oct), todos con pruebas
+
+1. **Telemetría del ciclo** (tarea 1 de la sección 9):
+   `packages/elde_core/elde_core/ui/telemetria_ciclo.py` (nuevo), enganches
+   en `render_box_captura.py` y `render_box.py`, e interruptor en el menú
+   Vista (`telemetria_ciclo_boolean`, guardado desde `windows_main.py`).
+   Escribe en `%LOCALAPPDATA%\tienda_view\telemetria_ciclo.jsonl` y vacía a
+   disco cada 2 s, así que **se puede leer en vivo**. Rota a 20 MB con una
+   copia, y **de noche se queda corto**: hay que ampliarlo. Marcas:
+   `t_captura`, `t_recibido` (el `t_leido` del encargo), `t_envio`,
+   `t_respuesta`, `t_paneles` y `t_pintado`, más `descartados`, `bytes`,
+   `personas` y `estado`. 10 pruebas.
+2. **Escáner de ventanas:** `windows_detector.py` (`es_del_propio_proceso`) y
+   `window_monitor.py` ahora descartan las ventanas del propio proceso. **La
+   causa:** la lista de ventanas a ignorar se arma al importar el módulo,
+   antes de que el cliente tenga ventanas. Los menús de Qt (título «python»)
+   se tomaban por fuentes de captura, y su miniatura les hacía
+   `BringWindowToTop` con 0,2 s de pausa: por eso «Añadir producto…» no abría
+   su diálogo. 2 pruebas, con ventanas reales de Windows.
+3. **Regla manual en píxeles:**
+   `packages/elde_core/elde_core/ui/regla_pixeles.py` (nuevo), más
+   `interactive_image_label.py` (el ratón y el pintado van ANTES de las
+   salidas tempranas, para que funcione sin zonas activas) y el menú Vista en
+   `render_box.py`. Mide en píxeles de la imagen que se manda
+   (`x * ancho / 1000`, la misma conversión que las zonas). No se guarda. 5
+   pruebas.
+4. **Descartar a la gente del fondo:**
+   `server/src/analityc/core/filtro_fondo.py` (nuevo); `PERSON_MIN_HEIGHT_PX`
+   en `config.py` (global 0, apagado); la llamada en `tiendas.py`, entre
+   `detectar_sv` y ByteTrack; el perfil
+   `server/config/camera_profiles/win-Media_Player-c3.json` (**235, solo para
+   el vídeo**, medido por el usuario con la regla); y el README de los
+   perfiles. Cada 60 s deja en el log
+   `FONDO [cam] descartadas=N de M detecciones`. 7 pruebas. En vivo (2-oct
+   14:10-14:20) descarta entre el 30 y el 100 % de las detecciones, y los fps
+   pasan de 5,4 a ~6,0 (comparación NO limpia: otro tramo del vídeo).
+
+**Cómo se probó:** las pruebas de `elde_core`, con el venv del cliente; ese
+venv no tiene pytest, así que se usó un mini-ejecutor y un doble de pytest en
+el scratchpad. Las del servidor, con `server\venv`. **No se ha corrido la
+suite entera del servidor en Windows.**
+
+### 12.5 Trampas de Windows
+
+- **NTFS no actualiza el tamaño ni la fecha de un fichero abierto:** el
+  listado de la carpeta engaña (unos logs parecían «parados» y se estaban
+  escribiendo). Hay que leer el contenido.
+- **Un proceso elevado** (el cliente, lanzado como Administrador) no se puede
+  cerrar desde una sesión normal, ni se puede leer su línea de órdenes.
+- **Con la VPN (Proton) puesta**, cualquier conexión directa a `72.68.60.141`
+  (puerto 9000, SSH 2223, ping) da `WinError 10013`.
+- **En una prueba de Qt, no fuerces `QT_QPA_PLATFORM=offscreen`:** la
+  QApplication es una por proceso, y rompe las pruebas que necesitan
+  ventanas reales.
+- Los scripts de medida (analizador de la telemetría y registrador de CPU,
+  RAM y GPU) están en `informes\datos_2026-10-01\` de Windows.
+
+### 12.6 Lista de revisión del 2-oct (estado al 5-oct)
+
+**Hecho** (detalle en la sección 13):
+
+- **Revisión del filtro del fondo:** bien colocado, antes de ByteTrack. La
+  suite completa pasa (13.2) y la A/B sobre el mismo trozo del vídeo está
+  hecha (13.3). Los anaqueles no cambian con el filtro.
+- **Este archivo frente al remoto:** comprobado el 5-oct. El commit de la
+  sesión Linux del 1-oct no llegó nunca (13.0).
+
+**En curso:**
+
+- **Los commits:** uno por funcionalidad y con permiso (13.1).
+
+**Pendiente** (también en 13.10):
+
+1. **Riesgos del filtro sin comprobar:** alguien cerca pero tapado por una
+   balda, o agachado, mide menos que el umbral y se pierde. Se mirarán con
+   las fotos de las fichas pequeñas (13.3).
+2. **El umbral de la cámara 3 en vivo:** medirlo con la regla en iVMS y crear
+   `win-iVMS-4200-c3.json`. **El 235 es del vídeo.**
+3. **«Escena cambió / se reanuda» en el mismo segundo:** visto el 1-oct
+   (17:26:37 y 17:29:32, con la ventana minimizada, y siguió contando sobre
+   imágenes vacías) y el 2-oct (15:46-15:47). El 30-sep marcó «sin señal».
+   Sin mirar el código.
+4. **La telemetría del cliente:** ampliar la rotación, que el 5-oct rotó en
+   mitad de una pasada. Si se quiere, pasar `t_recibido` a `t_leido`.
+5. **Los 2 agarres del 1-oct,** por verificar en iVMS.
+6. **La prueba del túnel** (5.9). Hay que apagar antes el servidor de
+   Windows, que ocupa `localhost:9000`.
+
+### 12.7 Errores de la sesión del cliente (no los repitas)
+
+1. **Deducir de la A/B que «el túnel cuesta 85-105 ms fijos por viaje»:**
+   era falso, lo corrigió la sesión del Linux (5.9).
+2. **Ofrecer TensorRT «para el detector»:** `ENABLE_TENSORRT` solo cambia los
+   modelos ONNX.
+3. **Dimensionar la rotación de la telemetría con los fps de día:** de noche
+   llegan más imágenes por segundo y se llenó antes.
+4. **Decir «el log no se escribe» mirando el listado de Windows** (12.5).
+5. **Escribir una prueba que forzaba `offscreen`** y rompía otra (12.5).
+
+---
+
+## 13. Sesión del CLIENTE en Windows (2 y 5 oct)
+
+Escrito el 5-oct por la sesión del cliente, para la siguiente. Medido en el
+PC `DESKTOP-9LHHJI2` salvo lo marcado como **deducido** o **sin comprobar**.
+El servidor de Windows escribe su log en **hora local** (Venezuela).
+
+### 13.0 Para empezar
+
+1. **El usuario NO quiere informes nuevos ni que se actualicen los de
+   `informes\` sin pedirlo.** Da los resultados en el chat. Tampoco copies
+   datos a `informes\` sin preguntar: es su carpeta.
+2. **El remoto de esta rama es `fork`** (`Dsha40/ELDE-TIENDAS`), no
+   `origin`. El 5-oct, `fork/feature/anaquel` seguía en `8100b95`: el commit
+   de la sesión Linux del 1-oct **nunca se subió**. Si se sube, chocará con
+   el CLAUDE.md de aquí.
+3. **Herramientas nuevas** en `informes\herramientas_cliente\` (además de
+   las de 12.0):
+
+   | Herramienta | Qué hace |
+   |---|---|
+   | `medir_cpu.ps1` | Espera a que lleguen imágenes y mide 60 s: py-spy del servidor **sin pausarlo** + CPU de cada proceso del PC. py-spy ya está instalado en `pyspy\` al lado |
+   | `etapas_pyspy.py` | Reparte una medida de py-spy por etapas del pipeline |
+   | `bench_heatmap.py` | Cronometra pintar/guardar el mapa de calor y abrir un JPEG |
+   | `tramos.py` | Tramos en que el cliente envió imágenes (telemetría). Lleva la fecha del 2-oct escrita: cámbiala |
+   | `contar_pasadas.py`, `recursos_pasadas.py`, `altos_fichas.py` | Conteos, recursos y alto de las fichas por ventana: `"A=HH:MM:SS-HH:MM:SS" ...` |
+
+4. **pytest en Windows:** `server\venv` no lo tiene. Se instala aparte con
+   `--target` en el scratchpad y se usa con `$env:PYTHONPATH`, más
+   `$env:ELDE_TIENDA_DB` con ruta absoluta.
+5. **Reiniciar el servidor:** `apagar_servidor.ps1` (Ctrl+C, vuelca el mapa
+   de calor) y arrancar desde `server\` con `Start-Process` y
+   `-RedirectStandardOutput/-Error`. **Antes de una A/B, ten la pose cargada**
+   (~1 min de vídeo hacia las 11:20:30; el log dice «ViTPose cargado»): su
+   carga congela ~18 s.
+6. **Antes de dejar el sistema solo, comprueba que llegan imágenes** (líneas
+   `FPS [` en el log del último minuto), no solo que `/health` responde (13.9).
+
+### 13.1 Estado del código (5-oct, ~12:00)
+
+- **Commits locales, SIN push:** `c2f96e5` (imagen del detector en la GPU) y
+  el del reloj fino, que lleva también este CLAUDE.md.
+- **Sin commitear, con pruebas:**
+  - mapa de calor bajo pedido (13.6);
+  - filtro del fondo;
+  - telemetría del ciclo;
+  - escáner de ventanas, con el arreglo de su prueba (13.2);
+  - regla en píxeles.
+
+  `config.py` mezcla el filtro y el mapa de calor, y `render_box.py` mezcla
+  la telemetría y la regla: hay que subir a cada commit solo su parte.
+- **El servidor de Windows corre con todo eso** (arrancado el 5-oct a las
+  11:18:58, modo G y mapa bajo pedido).
+
+### 13.2 Pruebas en Windows
+
+- **Servidor:** con el último commit del 1-oct (`8100b95`), 854 / 15 / 1. Con
+  los cambios del 2-oct, 861. Hoy, **876 passed**. La diferencia con Linux
+  (852 / 16 / 2) ya estaba con `8100b95`: es de Windows.
+- **Cliente (`packages/elde_core`):** el venv del cliente es **Python
+  3.14.7**. Dan **72 fallos con y sin cambios**: son las pruebas que buscan
+  `clients/amazonas`, `detecciones` y `perimetrales`, que no están en este
+  repo.
+- **La prueba del escáner fallaba en la pasada completa:** cinco pruebas
+  antiguas (`test_flecha_direccion.py:20` y otras) ponen Qt en `offscreen`
+  antes, y sin pantalla no hay ventanas reales. Arreglo: si Qt va
+  `offscreen`, se salta. Sola pasa.
+
+### 13.3 Filtro del fondo: A/B sobre el mismo trozo del vídeo (2-oct)
+
+A = con filtro (15:49:36-15:58:11), B2 = sin filtro (17:18:42-17:27:17). Son
+**515 s del mismo trozo**: las visitas y los agarres caen en el mismo segundo
+del vídeo, con un desfase fijo.
+
+| | A, con filtro | B2, sin filtro |
+|---|---:|---:|
+| Personas seguidas | 24 | 57 |
+| Fichas | 13 (todas ≥ 288 px) | 23 (14 de 56-187 px) |
+| Fichas «sin rostro» | 2 | 10 |
+| Entradas al ROI | 8 | 19 |
+| **Visitas / agarres** | **4 / 3** | **4 / 3** |
+| fps | 5,31 | 5,10 |
+
+- El filtro quita el 58 % de los seguimientos y el 43 % de las fichas, y no
+  toca los anaqueles. Apenas acelera (~4 %).
+- **Pendiente: mirar las fotos** de las 14 fichas pequeñas de la B2 (creadas
+  entre las 17:18:42 y las 17:27:17), para confirmar que son gente del fondo.
+- 14 fichas pequeñas **no son 14 personas del fondo**: sin filtro, quien
+  entra por el fondo del pasillo arranca su ficha cuando aún se ve pequeño.
+- **La primera B (17:03-17:08) era otro trozo del vídeo.** Su «13 % más de
+  fps» con filtro era falso.
+- El 235 es solo del vídeo. La cámara 3 en iVMS **no tiene filtro**.
+
+### 13.4 Dónde se va la CPU
+
+**Hardware** (leído el 5-oct):
+
+| Pieza | Qué es | ¿Frena? |
+|---|---|---|
+| Procesador | i5-6500, **4 núcleos / 4 hilos**, 3,2 GHz (2015) | **Sí, es el cuello principal** |
+| Memoria | 12 GB en **dos módulos distintos** (4 + 8 GB), a 1600 | Justa: con todo abierto quedan ~1,5-2,4 GB libres |
+| GPU | Quadro RTX 4000, 8 GB, PCIe gen3 x8 | No: va al 25-32 % |
+| Disco | SSD SATA de 224 GB, ~18 GB libres | No por velocidad |
+
+**En todo el PC** (2-oct, vídeo, código viejo): CPU al 99 %. El servidor se
+lleva el 50 %, la captura del cliente el 9,5 %, el cliente el 6 %, `dwm` el
+5,6 % y el editor ~6,9 %. Las consultas WMI de las propias medidas, ~3 %.
+
+**Hilo de las imágenes del servidor**, con py-spy **sin pausar**:
+
+| Etapa | 2-oct (código viejo) | 5-oct (modo G + mapa bajo pedido) |
+|---|---:|---:|
+| Detector | 64,4 % (31,4 % era preparar la imagen en la CPU) | 43,9 % |
+| Pose | no salió (sin gente en el estante) | 16,8 % |
+| Caras e identidad (ONNX) | 7,0 % | 9,6 % |
+| Abrir el JPEG que llega | 6,7 % | 9,3 % |
+| Mapa de calor | 9,1 % | **0,9 %** |
+| Comprobar la escena | 3,7 % | 5,7 % |
+| MiVOLO | 3,7 % | 5,0 % |
+
+⚠️ **py-spy con `--native` pausa al servidor en cada muestra.** Repartió mal
+el tiempo (dio un 40 % falso al mapa de calor) y dejó al servidor 47 s sin
+responder. **Usa siempre `--nonblocking`** y contrasta con un cronómetro.
+
+### 13.5 Imagen del detector en la GPU (`c2f96e5`): A/B G frente a C
+
+G = imagen preparada en la GPU (09:54:35-10:03:49), C = interruptor
+`ELDE_DETECTOR_PREPARAR_EN_GPU=0` (10:10:36-10:19:50). Mismos 554 s de vídeo
+y con filtro.
+
+| | **G** | C |
+|---|---:|---:|
+| fps | **7,71** | 5,22 |
+| Ciclo completo | 104 ms | 164 ms |
+| Servidor por imagen (mediana de los tramos de 30 s) | **57 ms** | 106 ms |
+| CPU del servidor / CPU total | **16,5 % / 70 %** | 55 % / 100 % |
+| Tiempo con la CPU ≥ 95 % | 26 % | 77 % |
+| Agarres / visitas / fichas | 3 / 3 / 12 | 3 / 4 / 12 |
+
+- **Banco fuera de línea:** detecciones idénticas (diferencia 0,0) en 12
+  imágenes con 84 personas.
+- **El modo G es el de por defecto del servidor**, viva donde viva el
+  cliente. Solo vuelve atrás con el interruptor, sin CUDA o si falla.
+- La C reproduce las ~5,3 fps del 2-oct: la mejora es del cambio.
+
+### 13.6 Mapa de calor bajo pedido y en JPEG (sin commitear)
+
+- **Antes:** cada 5 s, dentro del procesado de una imagen, se pintaba el mapa
+  a 1456×868 (~174 ms) y se guardaba en PNG (~258 ms). Eso era el ~9,6 % del
+  hilo y producía un tirón de ~430 ms.
+- **Ahora:**
+  - el procesado solo guarda el JSON, el fondo cada 60 s y el estado;
+  - `heatmap_bajo_pedido.py` pinta cuando alguien pide
+    `/dashboard/img/heatmap/<cámara>.png` (JPEG por dentro, misma dirección),
+    `/api/v1/heatmaps` o el PDF;
+  - las cámaras se listan por su `.json`;
+  - el histórico por horas sigue en PNG;
+  - `HEATMAP_PNG_PERIODICO = True` vuelve a lo de antes.
+- **En vivo:** el mapa pasa del 9,6 % al **0,9 %** del hilo. Pedir la imagen
+  cuesta **158 ms** y, desde la caché de 5 s, **5-20 ms**. El PNG ya no se
+  reescribe.
+- 8 pruebas nuevas (`test_heatmap_bajo_pedido.py`), verificadas al revés. Dos
+  pruebas de `test_heatmap_persistencia.py` cambiadas a propósito: el volcado
+  deja JSON y estado, no PNG.
+
+### 13.7 La captura del cliente (5-oct, leído y medido)
+
+`capture_worker.py` captura **siempre**, se envíe o no: ~17-18 capturas por
+segundo con Media Player, de las que se usan ~5. **Se tiran 2,3 por cada
+imagen enviada.**
+
+| Paso | Coste |
+|---|---:|
+| `PrintWindow` modo 0 (app normal) | 11,5 ms |
+| `PrintWindow` modo 2 (app que dibuja con GPU, como Media Player; iVMS sin medir) | 33,1 ms |
+| JPEG calidad 70 con PIL (OpenCV, 5,2 ms: no compensa cambiarlo) | 5,6 ms |
+| Firma anti-congelada | 6,3 ms, 1 de cada 30 |
+
+**Ideas, sin hacer:**
+1. **Capturar bajo pedido, con una de reserva.** Ahorro estimado: ~6 % del PC.
+2. **Leer el stream de la cámara directamente** (ruta DVR/RTSP del panel
+   Dispositivos), en vez de copiar la ventana de iVMS. Hoy la imagen se
+   descomprime en iVMS, se pinta, se copia, se vuelve a comprimir y el
+   servidor la descomprime otra vez.
+3. **Mandar la imagen sin comprimir** cuando cliente y servidor comparten
+   PC. Ojo: el formato del mensaje lo usan otros clientes (GUIA 4.7).
+
+**Pendiente:** medir con iVMS abierto (no minimizado) qué modo de copia
+necesita y si el panel Dispositivos conecta con la cámara 3.
+
+### 13.8 La pose cuando hay gente en el estante
+
+Con el modo G, el servidor tarda **57 ms con 0 personas**, 64 con 1, 82 con
+2, 109 con 3 y 162 con 4. Con la clienta junto al estante, 95-135 ms
+(4,4-6,6 fps). Con la misma gente lejos del estante, 62-65 ms.
+
+En py-spy (5-oct 10:50, sin la carga del modelo), la pose es el 14,7 % del
+hilo:
+
+| Paso | % del hilo |
+|---|---:|
+| Preparar el recorte (CPU, preparador de Hugging Face) | **7,1 %** |
+| El modelo (GPU) | 4,6 % |
+| Posproceso (scipy, CPU) | 2,1 % |
+| Dar la vuelta a los colores | 0,7 % |
+
+Candidato a llevar a la GPU, pero **más delicado que el detector**: no
+saldría idéntico, y un píxel de muñeca puede cambiar un agarre. Hay que
+probarlo con pruebas de puntos, con el tramo de la clienta y con una A/B.
+
+### 13.9 Otros hallazgos
+
+- **Fin de semana del 2 al 5 de oct: ningún dato.** El cliente estuvo
+  conectado 63 h y sus paneles consultaron al servidor ~36.000 veces, pero
+  ningún recuadro envió imágenes. Según el usuario, las cámaras no daban
+  señal. La sesión no comprobó, antes de que se fuera, que llegaban
+  imágenes.
+- **El disco libre baja 2-3,5 GB cada vez que se carga ViTPose** y vuelve al
+  apagar el servidor. Probablemente es el archivo de paginación [sin
+  comprobar].
+- **La telemetría del cliente rota a 20 MB y se queda corta:** el 5-oct
+  rotó en mitad de la pasada G. Hay que ampliarla, y para analizar hay que
+  leer también `telemetria_ciclo.jsonl.1`.
+- **«Escena cambió / se reanuda» en el mismo segundo**, otra vez el 2-oct a
+  las 15:46-15:47, mientras el usuario se movía por el vídeo. Sin mirar el
+  código.
+- **La clienta del Coffee-mate** (11:21:05 de cámara, aprox.) da **3
+  agarres** en todas las pasadas; la referencia de 5.5 decía 2. El producto
+  cambia de una pasada a otra (hallazgo 25).
+- Dashboard, API v1 y PDF dependían del PNG del mapa de calor (13.6).
+
+### 13.10 Pendientes, por orden
+
+1. **Commits:**
+   - el mapa de calor bajo pedido;
+   - el filtro del fondo;
+   - la telemetría del ciclo;
+   - el escáner de ventanas;
+   - la regla;
+   - este CLAUDE.md.
+
+   **Push solo cuando el usuario lo diga.**
+2. **Mirar las fotos de las 14 fichas pequeñas** (13.3).
+3. **iVMS:** el modo de copia y el stream directo de la cámara 3 (13.7), en
+   cuanto tenga señal.
+4. **Pose en la GPU** (13.8), con su A/B.
+5. **Captura bajo pedido** (13.7, idea 1).
+6. **Caras (9,6 %) y abrir el JPEG (9,3 %):** medir dentro qué parte es CPU.
+7. **Compartir ViTPose entre cámaras** (hallazgo 33). Importa con varias
+   cámaras.
+8. **Telemetría del cliente:** ampliar la rotación.
+9. Del CLAUDE.md y los informes del 2-oct, sin empezar:
+   - umbral del filtro para la cámara 3 en iVMS;
+   - «escena cambió / se reanuda»;
+   - verificar los 2 agarres del 1-oct;
+   - dar de alta al personal;
+   - ignorar la imagen oscura de noche;
+   - panel de Anaqueles «Persona (Desconocido)»;
+   - «configuración creada» al cargar;
+   - doble conteo entre cámaras;
+   - el listón de la demografía;
+   - mano con codo → muñeca;
+   - la prueba del túnel.
+10. **Hardware** (decisión del usuario): si hiciera falta, primero un
+    procesador con más núcleos; la RAM, dos módulos iguales de 8 GB.
+
+### 13.11 Errores de esta sesión (no los repitas)
+
+1. **Dar el 40 % del mapa de calor con py-spy `--native`** (pausa al
+   servidor). Usa `--nonblocking` y contrasta.
+2. **Comparar pasadas de trozos distintos del vídeo** (el «13 %» del
+   filtro). Antes de comparar, comprueba que los mismos sucesos caen en el
+   mismo segundo del vídeo, y apunta la hora de cámara **antes** de cada
+   pasada.
+3. **Contar mal y afirmar sin mirar:** «3 visitas» eran 4; los agarres «de
+   la clienta» antes de tener la hora de cámara; «vídeo parado» cuando solo
+   se sabía que no llegaban imágenes.
+4. **Atribuir al detector una línea genérica de torch** (`_call_impl`) que
+   también usan otros modelos. Reparte por la marca más interna de nuestro
+   código.
+5. **No comprobar, antes de dejar el sistema solo, que llegaban imágenes.**
+6. **Meter medidas (py-spy, bancos) en medio de una pasada:** ensucian sus
+   fps.
+7. **Actualizar el informe varias veces sin que el usuario lo pidiera.**

@@ -193,11 +193,16 @@ class DrenajeCliente:
                 break
 
             try:
-                t_proc = time.monotonic()
+                # perf_counter y no monotonic (5-oct-2026): en Windows,
+                # monotonic va a saltos de ~15,6 ms y el «proceso» de la
+                # telemetría salía en escalones (94, 109, 125…). El 2-oct no
+                # distinguió una diferencia de 10 ms entre dos pasadas A/B
+                # que el cliente sí vio. En Linux los dos son finos.
+                t_proc = time.perf_counter()
                 result = await loop.run_in_executor(
                     self._executor_getter(), self._procesar, *item.payload)
                 telemetria_fps.anotar_procesado(
-                    item.camera_id, (time.monotonic() - t_proc) * 1000.0)
+                    item.camera_id, (time.perf_counter() - t_proc) * 1000.0)
             except asyncio.CancelledError:
                 break
             except Exception as exc:                        # noqa: BLE001
