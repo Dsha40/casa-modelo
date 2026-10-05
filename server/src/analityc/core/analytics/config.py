@@ -473,6 +473,15 @@ class AnalyticsConfig:
     # VIVO: lo lee tiendas.py y lo puede bajar el perfil de UNA camara
     # (server/config/camera_profiles/*.json).
     PERSON_DETECT_CONF: float = 0.25
+    # Alto MINIMO de una persona, en pixeles de la imagen que manda el
+    # cliente, para tenerla en cuenta (2-oct-2026). Las mas bajas se tiran
+    # justo despues del detector (`filtro_fondo.py`): no generan ficha,
+    # entrada, demografia, anaqueles ni calor. Sirve para la gente del FONDO,
+    # que se ve pequena porque no esta en el pasillo. 0 = apagado. Depende de
+    # la geometria de cada camara, asi que se fija en su PERFIL
+    # (server/config/camera_profiles/*.json), no aqui. Se mide con la regla
+    # del cliente (menu Vista), que da los mismos pixeles.
+    PERSON_MIN_HEIGHT_PX: int = 0
 
     # ── Tracking de corto plazo: sv.ByteTrack (sustituye al BoT-SORT interno
     # de YOLO). Es la capa 1 (IDs efimeros por movimiento/Kalman); la capa 2

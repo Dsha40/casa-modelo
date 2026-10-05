@@ -53,3 +53,17 @@ equivocado.
 - `win-iVMS-4200.json` — Ventana iVMS-4200 (stand de degustación): ojo de
   pez muy marcado, personas útiles con bbox de 60-140 px de alto (el mínimo
   global 60x140 las rechazaba todas como «Persona muy lejana»).
+- `win-Media_Player-c3.json` — La grabación de prueba de la cámara 3 en Media
+  Player. Solo `PERSON_MIN_HEIGHT_PX: 235`: descarta a la gente del fondo
+  (2-oct-2026, medido con la regla del cliente). **Sus píxeles no valen para
+  la cámara 3 en vivo**, que manda imágenes de otro tamaño.
+
+## Descartar a la gente del fondo (`PERSON_MIN_HEIGHT_PX`)
+
+Alto mínimo, en píxeles de la imagen que manda el cliente, para tener en
+cuenta a una persona (global: 0, apagado). Las más bajas se tiran justo
+después del detector (`src/analityc/core/filtro_fondo.py`): no dejan
+seguimiento, ficha, entrada, demografía, anaqueles ni calor. Para elegir el
+valor, mide con la regla del cliente (menú Vista → «Regla: medir en píxeles»)
+en LA MISMA fuente que usará la cámara. El log dice cada minuto cuántas
+detecciones se tiraron: `FONDO [cámara] descartadas=N de M …`.

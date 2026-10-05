@@ -24,6 +24,7 @@ from ..config.config import (
 # en el espacio de siempre (0 = persona), asi que ByteTrack, PolygonZone,
 # demografia y heatmap siguen intactos aguas abajo.
 from . import deteccion_compartida
+from . import filtro_fondo
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
 from .analytics.demographics import (DemographicsClassifier,
@@ -2263,6 +2264,13 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     # RFDETR_* del modulo compartido, no PERSON_DETECT_IMGSZ.
                     sv_det = deteccion_compartida.detectar_sv(
                         inference_image, conf_min=_per_conf, clases=[0])
+                    # Gente del FONDO fuera, ANTES de ByteTrack: lo que se
+                    # quita aqui no genera seguimiento, ficha, entrada,
+                    # demografia, anaqueles ni calor (`filtro_fondo.py`).
+                    # El umbral es del perfil de ESTA camara; global = 0.
+                    sv_det = filtro_fondo.filtrar(
+                        sv_det, getattr(_cfg_cam, 'PERSON_MIN_HEIGHT_PX', 0),
+                        camera_id)
 
                     # ── Tracking de corto plazo con sv.ByteTrack ──
                     # El tracking lo hace ByteTrack (no un tracker interno del
