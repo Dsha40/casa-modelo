@@ -416,6 +416,13 @@ class AnalyticsConfig:
     HEATMAP_STAMP_SIGMA: float = 1.2
     # Cada cuantos segundos se guarda el snapshot PNG/JSON para el dashboard.
     HEATMAP_SNAPSHOT_EVERY_S: float = 5.0
+    # PNG del mapa vigente pintado en cada snapshot (5-oct-2026). False: el
+    # snapshot solo guarda el JSON, y la imagen se pinta BAJO PEDIDO y en
+    # JPEG cuando alguien la mira (`heatmap_bajo_pedido.py`). Pintar + PNG
+    # costaba ~430 ms cada 5 s DENTRO del procesado de una imagen, el 9,6 %
+    # del hilo (py-spy, PC de la tienda). True = como antes, por si algo de
+    # fuera del repo lee output/heatmap/<camara>.png del disco.
+    HEATMAP_PNG_PERIODICO: bool = False
     # Carpeta de snapshots (la lee el webapp).
     HEATMAP_DIR: str = "output/heatmap"
     # Cuantas zonas calientes reportar en metadata/dashboard (ranking

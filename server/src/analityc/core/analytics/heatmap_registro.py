@@ -53,6 +53,14 @@ def obtener(camera_id: Any,
         return fila['acumulador']
 
 
+def nombre(camera_id: Any) -> Optional[str]:
+    """El nombre legible de la camara, si se conoce (para el titulo del mapa
+    pintado bajo pedido, `heatmap_bajo_pedido.py`)."""
+    with _CANDADO:
+        fila = _POR_CAMARA.get(_safe_camera_name(camera_id))
+    return fila['nombre'] if fila else None
+
+
 def _cajas_de(metadata: Dict[str, Any]) -> List[Any]:
     """Las cajas [x1,y1,x2,y2] que el metadata ya lleva al cliente."""
     cajas: List[Any] = []

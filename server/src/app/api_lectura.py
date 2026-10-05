@@ -117,7 +117,10 @@ def _hay_analitica(device_id: str) -> bool:
 
 
 def _hay_heatmap(device_id: str) -> bool:
-    return (_salida() / 'heatmap' / f'{device_id}.png').is_file()
+    # Desde el 5-oct-2026 el mapa vigente no deja PNG: vale su JSON
+    # (`heatmap_bajo_pedido.py`).
+    from ..analityc.core.analytics import heatmap_bajo_pedido as _bajo_pedido
+    return _bajo_pedido.existe(device_id, str(_salida() / 'heatmap'))
 
 
 @router.get('/analitica/{device_id}')
@@ -156,17 +159,20 @@ def listar_heatmaps() -> Dict[str, Any]:
     carpeta = _salida() / 'heatmap'
     if not carpeta.is_dir():
         return {'total': 0, 'heatmaps': []}
+    # Desde el 5-oct-2026 el mapa vigente no deja PNG: la lista sale de su
+    # JSON y la imagen se pinta bajo pedido (`heatmap_bajo_pedido.py`).
+    # 'bytes' queda en 0 cuando no hay PNG en disco.
+    from ..analityc.core.analytics import heatmap_bajo_pedido as _bajo_pedido
     conocidos = {f['device_id']: f for f in _registro.dispositivos()}
     fuera = []
-    for png in sorted(carpeta.glob('*.png')):
-        if png.name.endswith('.tmp.png'):
-            continue
-        ident = png.stem
+    for h in _bajo_pedido.listado(str(carpeta)):
+        ident = h['camera']
+        png = carpeta / f'{ident}.png'
         fila = conocidos.get(ident)
         fuera.append({
             'device_id': ident,
-            'bytes': png.stat().st_size,
-            'modificado': int(png.stat().st_mtime),
+            'bytes': png.stat().st_size if png.is_file() else 0,
+            'modificado': int(h['mtime']),
             'site_id': fila['site_id'] if fila else None,
             'camera_name': fila['camera_name'] if fila else None,
             'huerfano': fila is None,

@@ -716,23 +716,28 @@ class HeatmapAccumulator:
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Heatmap bg fallo: %s", exc)
 
-            _titulo = str(camera_name or camera_id)
-            _sub = f"{self._samples} registros · acumulado"
-            if background is None or background.size == 0:
-                background = np.zeros(
-                    (self.grid_h * 10, self.grid_w * 10, 3), np.uint8)
-            img = self._render_grid(background, self._total,
-                                    con_leyenda=True, titulo=_titulo,
-                                    subtitulo=_sub)
+            # La imagen del mapa vigente ya no se pinta aqui (5-oct-2026): se
+            # pinta bajo pedido y en JPEG (`heatmap_bajo_pedido.py`). Costaba
+            # ~430 ms cada 5 s dentro del procesado de una imagen.
+            ok = True
+            if AnalyticsConfig.HEATMAP_PNG_PERIODICO:
+                _titulo = str(camera_name or camera_id)
+                _sub = f"{self._samples} registros · acumulado"
+                if background is None or background.size == 0:
+                    background = np.zeros(
+                        (self.grid_h * 10, self.grid_w * 10, 3), np.uint8)
+                img = self._render_grid(background, self._total,
+                                        con_leyenda=True, titulo=_titulo,
+                                        subtitulo=_sub)
 
-            png_path = os.path.join(out_dir, f"{name}.png")
-            # El tmp DEBE terminar en .png: cv2.imwrite infiere el formato
-            # de la extension (con '.tmp' falla silenciosamente).
-            tmp_png = os.path.join(out_dir, f"{name}.tmp.png")
-            ok = cv2.imwrite(tmp_png, img,
-                             [cv2.IMWRITE_PNG_COMPRESSION, 3])
-            if ok:
-                os.replace(tmp_png, png_path)
+                png_path = os.path.join(out_dir, f"{name}.png")
+                # El tmp DEBE terminar en .png: cv2.imwrite infiere el formato
+                # de la extension (con '.tmp' falla silenciosamente).
+                tmp_png = os.path.join(out_dir, f"{name}.tmp.png")
+                ok = cv2.imwrite(tmp_png, img,
+                                 [cv2.IMWRITE_PNG_COMPRESSION, 3])
+                if ok:
+                    os.replace(tmp_png, png_path)
 
             meta = {
                 "camera_id": str(camera_id),

@@ -405,14 +405,22 @@ def _sec_mapas(fecha: str, st) -> List[Any]:
     raiz = Path(AnalyticsConfig.HEATMAP_DIR)
     if not raiz.is_absolute():
         raiz = Path(__file__).resolve().parents[2] / raiz
+    from ..analityc.core.analytics import heatmap_bajo_pedido as _bajo_pedido
     for h in filas[:6]:
+        # Pintado ahora, en JPEG (5-oct-2026: el mapa vigente ya no deja
+        # PNG en disco); si no se puede, el PNG de antes si existe.
+        datos = _bajo_pedido.imagen(h['device_id'], str(raiz))
         ruta = raiz / f"{h['device_id']}.png"
-        if not ruta.is_file():
+        if datos is not None:
+            fuente: Any = io.BytesIO(datos)
+        elif ruta.is_file():
+            fuente = str(ruta)
+        else:
             continue
         salida.append(Paragraph(
             f"<b>{h.get('camera_name') or h['device_id']}</b>"
             + (' · sin registrar' if h.get('huerfano') else ''), st['h3']))
-        salida.append(RLImage(str(ruta), width=15 * cm, height=9 * cm,
+        salida.append(RLImage(fuente, width=15 * cm, height=9 * cm,
                               kind='proportional'))
         salida.append(Spacer(1, 6))
     if len(filas) > 6:

@@ -107,13 +107,16 @@ def test_el_acumulado_sobrevive_a_un_reinicio(reloj_congelado):
         assert renacido._samples == 11
 
 
-def test_flush_escribe_png_y_estado_sin_frame_a_mano(reloj_congelado):
+def test_flush_escribe_json_y_estado_sin_frame_a_mano(reloj_congelado):
+    """Desde el 5-oct-2026 el mapa vigente NO deja PNG: se pinta bajo pedido
+    (`heatmap_bajo_pedido.py`). El volcado deja el JSON (con el que se lista
+    la camara) y el estado; el PNG solo con HEATMAP_PNG_PERIODICO."""
     reloj_congelado(_MARTES_MEDIODIA)
     with tempfile.TemporaryDirectory() as tmp:
         acc = HeatmapAccumulator()
         _estampar(acc)
         assert acc.flush('cam-y', out_dir=tmp)
-        assert (Path(tmp) / 'cam-y.png').is_file()
+        assert not (Path(tmp) / 'cam-y.png').exists()
         assert (Path(tmp) / 'cam-y.json').is_file()
         assert (Path(tmp) / 'state' / 'cam-y.npz').is_file()
         # Dentro de la misma hora el flush NO cierra ninguna hora: el
@@ -212,10 +215,24 @@ def test_volcar_todos_escribe_cada_camara():
                 'cam-volcado', 'Volcada', _FRAME,
                 {'detections': [{'box': [10, 10, 50, 90]}]})
             assert reg.volcar_todos() >= 1
-            assert (Path(tmp) / 'cam-volcado.png').is_file()
+            # Sin PNG desde el 5-oct-2026 (bajo pedido): JSON + estado.
+            assert (Path(tmp) / 'cam-volcado.json').is_file()
             assert (Path(tmp) / 'state' / 'cam-volcado.npz').is_file()
         finally:
             AnalyticsConfig.HEATMAP_DIR = original
+
+
+def test_con_el_interruptor_vuelve_el_png_periodico(reloj_congelado,
+                                                     monkeypatch):
+    """HEATMAP_PNG_PERIODICO=True = como antes del 5-oct-2026, por si algo
+    de fuera del repositorio lee el PNG del disco."""
+    reloj_congelado(_MARTES_MEDIODIA)
+    monkeypatch.setattr(AnalyticsConfig, 'HEATMAP_PNG_PERIODICO', True)
+    with tempfile.TemporaryDirectory() as tmp:
+        acc = HeatmapAccumulator()
+        _estampar(acc)
+        assert acc.flush('cam-png', out_dir=tmp)
+        assert (Path(tmp) / 'cam-png.png').is_file()
 
 
 def test_api_historico_lista_y_sirve_saneado():

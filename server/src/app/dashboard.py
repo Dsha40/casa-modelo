@@ -29,7 +29,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from ..analityc.core.analytics.config import AnalyticsConfig
 
@@ -573,19 +573,14 @@ def dashboard_telemetria():
 
 @router.get("/dashboard/api/heatmaps")
 def dashboard_heatmaps():
-    """Snapshot vigente del mapa de calor por camara (PNGs de primer nivel)."""
+    """Mapa de calor vigente por camara. Desde el 5-oct-2026 no hay PNG: la
+    lista sale del JSON que el acumulador escribe cada 5 s, y la imagen se
+    pinta bajo pedido (`heatmap_bajo_pedido.py`)."""
     try:
-        hdir = _heatmap_dir()
-        out = []
-        if os.path.isdir(hdir):
-            for fn in sorted(os.listdir(hdir)):
-                if not fn.endswith('.png') or fn.endswith('.tmp.png'):
-                    continue
-                p = os.path.join(hdir, fn)
-                if not os.path.isfile(p):
-                    continue
-                out.append({'name': fn, 'camera': fn[:-4],
-                            'mtime': os.path.getmtime(p)})
+        from ..analityc.core.analytics import heatmap_bajo_pedido as _bajo_pedido
+        out = [{'name': f"{h['camera']}.png", 'camera': h['camera'],
+                'mtime': h['mtime']}
+               for h in _bajo_pedido.listado(_heatmap_dir())]
         return {'status': 'ok', 'heatmaps': out}
     except Exception as exc:
         logger.exception("dashboard_heatmaps error")
@@ -622,6 +617,15 @@ def img_face(uid: str):
 
 @router.get("/dashboard/img/heatmap/{name}.png")
 def img_heatmap(name: str):
+    """Pintado bajo pedido y en JPEG (5-oct-2026, `heatmap_bajo_pedido.py`).
+    La direccion sigue acabando en .png para no romper a quien la tenga
+    guardada: el navegador se guia por el tipo de contenido. Si no se puede
+    pintar, el PNG de antes, si existe."""
+    from ..analityc.core.analytics import heatmap_bajo_pedido as _bajo_pedido
+    datos = _bajo_pedido.imagen(_safe(name), _heatmap_dir())
+    if datos is not None:
+        return Response(content=datos, media_type='image/jpeg',
+                        headers={'Cache-Control': 'no-store'})
     return _serve(os.path.join(_heatmap_dir(), f"{_safe(name)}.png"))
 
 
