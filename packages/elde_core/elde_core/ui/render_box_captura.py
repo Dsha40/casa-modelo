@@ -50,6 +50,7 @@ from ..dvr.hikconnect import HikConnectStrategy
 from ..dvr.hikconnect_channel_encoder import ChannelTypeDetector
 from ..dvr.storage import DVRRepository
 from ..logging import obtener
+from . import telemetria_ciclo as _telemetria
 
 log = obtener(__name__)
 
@@ -505,10 +506,18 @@ class CapturaDVRMixin:
                     raw=False, strict_map_key=False, max_buffer_size=MAX_BUFFER)
             self._unpacker.feed(raw_data)
             message = None
+            completos = 0
             for _m in self._unpacker:       # itera solo mensajes COMPLETOS
                 message = _m
+                completos += 1
             if message is None:
                 return
+            # Telemetria del ciclo (24-sep-2026): getattr porque no todos los
+            # clientes que comparten este mixin la tienen.
+            tel = getattr(self, '_telemetria', None)
+            if tel is not None and not tel.activa:
+                tel = None
+            t_recibido = time.time() if tel is not None else None
             header = message.get("header")
             image_bytes = message.get("image_bytes")
             if not header or not image_bytes:
@@ -572,11 +581,24 @@ class CapturaDVRMixin:
                         self, "min_perm_vehiculos", None),
                 }
                 if self.smart_mode and self.can_send_next_frame:
+                    if tel is not None:
+                        # Los intermedios del mismo lote tambien se tiran.
+                        tel.descartados += completos - 1
+                        tel.abrir(self._device_id(), 'ventana',
+                                  t_captura=_telemetria.epoch_de_cabecera(header),
+                                  t_recibido=t_recibido)
+                        tel.dato('bytes', len(image_bytes))
                     # Modo directo: guardar el frame enviado para dibujar
                     # encima las detecciones que devuelva el servidor.
                     self._pending_frame_bytes = image_bytes
                     self.socket.send_binary_frame(self.component_key, data)
                     self.can_send_next_frame = False
+                    if tel is not None:
+                        tel.marcar('t_envio')
+                elif self.smart_mode and tel is not None:
+                    # Imagenes que el worker entrego mientras habia una en
+                    # vuelo: el tiempo que la captura YA trabaja en paralelo.
+                    tel.descartados += completos
 
                 # Con IA el display llega desde la respuesta del servidor
                 # (on_text_message_received -> update_streaming_frame); sin IA

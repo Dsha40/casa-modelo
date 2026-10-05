@@ -59,6 +59,7 @@ from elde_core.ui import identidad_camara as _identidad
 from elde_core.ui.render_box_captura import CapturaDVRMixin
 from elde_core.ui.render_box_puerta import PuertaDireccionalMixin
 from elde_core.ui import overlay_munecas as _munecas
+from elde_core.ui import telemetria_ciclo as _telemetria
 from elde_core.ui.selector_local_camara import (
     SelectorLocalCamara, SIN_LOCAL_USA_EL_PIE)
 _DVR_MIME = "application/x-dvr-channel"
@@ -205,6 +206,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                  # APAGADO: es una ayuda de calibracion, no algo que deba
                  # aparecer solo en la pantalla del operador.
                  munecas_boolean=False,
+                 # Telemetria del ciclo a disco (24-sep-2026). Diagnostico:
+                 # nace APAGADA.
+                 telemetria_ciclo_boolean=False,
                  **_legacy_kwargs,
                  ):
         super().__init__()
@@ -291,6 +295,11 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self._munecas_ultimas = []
         self._munecas_ts = None
         self._munecas_boolean = bool(munecas_boolean)
+        # Marcas de tiempo por fotograma, a un JSONL (ver telemetria_ciclo).
+        # El servidor midio un ciclo de 156 ms con ~99 de «espera» que desde
+        # alli no se puede desglosar; esto lo mide desde este lado.
+        self._telemetria = _telemetria.TelemetriaCiclo(
+            activa=telemetria_ciclo_boolean)
         # Overlay de Supervision (uno por camara: estelas/heatmap son per-camara).
         # Si no esta disponible queda None y se usa el dibujo con QPainter.
         self._sv_overlay = None
@@ -588,11 +597,17 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                 # quedarse mudo para siempre esperando una que no llegara.
                 self.can_send_next_frame = True
             if self.can_send_next_frame:
+                tel = self._telemetria if self._telemetria.activa else None
+                if tel is not None:
+                    tel.abrir(self._device_id(), 'dvr', t_captura=now)
                 buf = QBuffer()
                 buf.open(QIODevice.WriteOnly)
                 img.save(buf, "JPEG", 80)
                 jpeg_bytes = bytes(buf.data())
                 buf.close()
+                if tel is not None:
+                    tel.marcar('t_jpeg')
+                    tel.dato('bytes', len(jpeg_bytes))
 
                 roi_c       = self.imagen_label.get_coordinates(w, h)
                 order_c     = self.imagen_label.get_order_zone_coordinates(w, h)
@@ -644,6 +659,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                 self.socket.send_binary_frame(self.component_key, data)
                 self.can_send_next_frame = False
                 self._frame_en_vuelo_ts = time.time()
+                if tel is not None:
+                    tel.marcar('t_envio', self._frame_en_vuelo_ts)
+            elif self._telemetria.activa:
+                self._telemetria.descartados += 1
             # No mostrar frame crudo — el frame procesado llega del servidor
             # (modo clasico) o se dibuja local (modo directo)
         else:
@@ -1127,6 +1146,15 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self._munecas_boolean = not self._munecas_boolean
         self._save_all("munecas_boolean", self._munecas_boolean)
 
+    def _toggle_telemetria_ciclo(self):
+        if self._telemetria.activa:
+            self._telemetria.apagar()
+        else:
+            self._telemetria.activa = True
+            print(f"[TELEMETRIA] escribiendo en {_telemetria.ruta_por_defecto()}",
+                  flush=True)
+        self._save_all("telemetria_ciclo_boolean", self._telemetria.activa)
+
     def _toggle_vlm(self):
         """Activa/desactiva el verificador de eventos (Etapa 2) en el servidor.
         El estado viaja en el payload websocket; el servidor hace lazy-load
@@ -1229,6 +1257,14 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         # unico que manda munecas.
         self._add_toggle(menu, "Munecas del anaquel (diagnostico)",
                          self._munecas_boolean, self._toggle_munecas)
+        # Diagnostico de rendimiento: el operador la enciende, usa el cliente
+        # y la sesion de soporte lee el fichero despues. La ruta se ensenia
+        # aqui mismo para que no haya que buscarla.
+        self._add_toggle(menu, "Telemetria del ciclo (diagnostico)",
+                         self._telemetria.activa,
+                         self._toggle_telemetria_ciclo)
+        ruta = menu.addAction(f"   → {_telemetria.ruta_por_defecto()}")
+        ruta.setEnabled(False)
         self._add_toggle(menu, "Cajas estilo elipse",
                          self.ellipse_style, self._toggle_box_style)
 
@@ -1774,6 +1810,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             # conexion con 1011 'keepalive ping timeout' cada ~3 minutos
             # (diagnostico del 7-ago-2026; ver server/src/app/ws_drenaje.py).
             return
+        tel = self._telemetria if self._telemetria.en_vuelo() else None
+        if tel is not None:
+            tel.marcar('t_respuesta')
+        estado_tel = 'error'
         try:
             metadata  = message.get("data", {}).get("metadata", {})
             if metadata:
@@ -1815,7 +1855,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                         "camera_id": self._device_id(),
                         "camera_name": self._camera_display_name(),
                     })
+            if tel is not None:
+                tel.marcar('t_paneles')
             data = message["data"]
+            estado_tel = str(data.get("status") or "sin_status")
             # El servidor hace eco del `camera_id` que le enviamos, que desde
             # H-11 es el device_id estable y NO component_key. Comparar contra
             # component_key aqui fallaba siempre y la imagen procesada no se
@@ -1829,6 +1872,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                 elif detections is not None:
                     # Modo DIRECTO: dibujar las detecciones sobre el frame enviado.
                     self._draw_detections_and_show(detections)
+                if tel is not None:
+                    tel.marcar('t_pintado')
+                    tel.dato('personas', len(detections or []))
+                estado_tel = 'ok'
                 # FPS REAL de la IA: frames procesados por el servidor/seg.
                 self._ai_fps_count += 1
                 _now = time.time()
@@ -1842,6 +1889,8 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         except Exception as e:
             print(f"on_text_message_received error: {e}")
         finally:
+            if tel is not None:
+                tel.cerrar(estado_tel)
             self.can_send_next_frame = True
 
     def reconnect_socket(self, data):

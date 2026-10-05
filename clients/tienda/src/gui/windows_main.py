@@ -257,6 +257,11 @@ class MainWindow(QMainWindow):
                 # Munecas del anaquel: ayuda de calibracion, apagada por
                 # defecto y persistida por camara como el resto de la vista.
                 munecas_boolean            = cfg.get("munecas_boolean", False),
+                # Telemetria del ciclo a disco: diagnostico de rendimiento,
+                # apagada por defecto. Persiste para que sobreviva a cerrar
+                # y reabrir el cliente durante una sesion de medida.
+                telemetria_ciclo_boolean   = cfg.get("telemetria_ciclo_boolean",
+                                                     False),
                 asignar_numero_anaquel     = self._asignar_numero_anaquel,
                 liberar_numero_anaquel     = self._liberar_numero_anaquel,
                 vlm_enabled_boolean        = cfg.get("vlm_enabled_boolean", False),
