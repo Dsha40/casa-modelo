@@ -29,6 +29,8 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 import supervision as sv
 
+from . import imagen_a_gpu
+
 logger = logging.getLogger(__name__)
 
 #: nombre COCO -> id del espacio ultralytics-80 (el contrato de siempre).
@@ -122,11 +124,19 @@ class _DetectorCompartido:
         # instancia: el candado serializa el predict — la GPU igual lo
         # serializaria, y sin el dos trazas JIT concurrentes pueden chocar.
         self._candado = threading.Lock()
+        # Imagen preparada en la GPU (2-oct-2026, `imagen_a_gpu.py`): en el PC
+        # de la tienda, prepararla en la CPU era el 31 % del hilo de las
+        # imagenes. None = el camino de siempre (numpy). Se decide UNA vez.
+        self._preparar_en: Optional[str] = (
+            self.dispositivo if imagen_a_gpu.usar_gpu(self.dispositivo)
+            else None)
         self.detectar(np.zeros((600, 960, 3), dtype=np.uint8))   # warmup
         logger.info(
-            "detector compartido cargado: %s (RF-DETR %s px, dtype %s) en %s",
+            "detector compartido cargado: %s (RF-DETR %s px, dtype %s) en %s; "
+            "imagen preparada en la %s",
             pesos.name, ajustes['resolucion'] or 'por defecto',
-            ajustes['dtype'] or 'por defecto', self.dispositivo)
+            ajustes['dtype'] or 'por defecto', self.dispositivo,
+            'GPU' if self._preparar_en else 'CPU')
 
     def detectar(self, frame_bgr: np.ndarray, conf_min: float = 0.3,
                  clases: Optional[Sequence[int]] = None) -> sv.Detections:
@@ -136,9 +146,17 @@ class _DetectorCompartido:
         None = todas las de NOMBRE_A_PSEUDO. `conf_min` es el umbral del
         predict (piso 0.05: por debajo un DETR solo escupe basura).
         """
-        rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
+        # En la GPU si se puede (`imagen_a_gpu.py`); si no, o si falla, el RGB
+        # en numpy de siempre. Los dobles de las pruebas se crean sin
+        # __init__ y no tienen el atributo: camino de siempre.
+        entrada = None
+        destino = getattr(self, '_preparar_en', None)
+        if destino is not None:
+            entrada = imagen_a_gpu.preparar(frame_bgr, destino)
+        if entrada is None:
+            entrada = np.ascontiguousarray(frame_bgr[:, :, ::-1])
         with self._candado:
-            det = self._modelo.predict(rgb,
+            det = self._modelo.predict(entrada,
                                        threshold=max(0.05, float(conf_min)),
                                        include_source_image=False)
         if det is None or len(det) == 0:
