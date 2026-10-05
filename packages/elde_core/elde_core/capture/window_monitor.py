@@ -3,7 +3,7 @@ import win32process
 
 
 from PySide6.QtCore import QObject, Signal, QThread, Property
-from .windows_detector import WindowScannerThread
+from .windows_detector import WindowScannerThread, es_del_propio_proceso
 
 
 
@@ -181,8 +181,9 @@ class Windows_monitor(QObject):
             
         windows = {}
         def enum_windows_proc(hwnd, param):
-            # Ignorar ventanas en la lista de exclusiones
-            if hwnd in ignore_hwnds:
+            # Ignorar ventanas en la lista de exclusiones y las del propio
+            # cliente (ver `es_del_propio_proceso`).
+            if hwnd in ignore_hwnds or es_del_propio_proceso(hwnd):
                 return True
                 
             if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd):

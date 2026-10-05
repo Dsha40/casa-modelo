@@ -2,11 +2,32 @@ from PySide6.QtCore import Signal, QThread
 
 import win32gui
 import win32con
+import win32process
 import pythoncom
 import ctypes
 from ctypes import wintypes
+import os
 import time
 import psutil
+
+
+def es_del_propio_proceso(hwnd) -> bool:
+    """¿La ventana es de ESTE cliente (sus menús, diálogos, la principal)?
+
+    La lista `ignore_hwnds` se arma al importar `window_monitor`, cuando el
+    cliente todavía no tiene ninguna ventana: en la práctica no ignoraba
+    nada. Cada menú desplegable de Qt es una ventana de nivel superior con
+    título («python»), así que el escáner la tomaba por una fuente de
+    captura y su miniatura le hacía SetWindowPos + BringWindowToTop +
+    parpadeo con 0,2 s de sleep en el hilo de la interfaz. Visto el
+    28-sep-2026: «Productos del anaquel > Área > Añadir producto…» cerraba
+    los menús sin abrir nunca el diálogo del nombre. Filtrar por PID vale
+    para cualquier ventana que el cliente abra en el futuro, sin mantener
+    una lista."""
+    try:
+        return win32process.GetWindowThreadProcessId(hwnd)[1] == os.getpid()
+    except Exception:                                       # noqa: BLE001
+        return False
 
 
 # Definir la estructura de la función de callback para SetWinEventHook
@@ -53,9 +74,9 @@ class WindowScannerThread(QThread):
         
         def enum_windows(hwnd, _):
             # Si este HWND está en la lista de ignorados, saltarlo
-            if hwnd in self.ignore_hwnds:
+            if hwnd in self.ignore_hwnds or es_del_propio_proceso(hwnd):
                 return True
-                
+
             if (win32gui.IsWindowVisible(hwnd) and 
                 win32gui.GetParent(hwnd) == 0 and
                 win32gui.GetWindowText(hwnd) != ""):
