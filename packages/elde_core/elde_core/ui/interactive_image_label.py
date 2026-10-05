@@ -6,6 +6,7 @@ from .flecha_direccion import INDICE_MEDIO, FlechaDireccion
 from .linea_cruce import LineaCruce
 from .productos_anaquel import ProductosAnaquel
 from .puerta_direccional import PuertaDireccional
+from .regla_pixeles import ReglaPixeles
 
 
 # Colores BGR-independientes para Qt (RGB)
@@ -162,6 +163,11 @@ class Interactive_imageLabel(QLabel):
         # no significa nada, y el servidor tampoco lo recibe.
         self.productos = ProductosAnaquel(kwargs.get('anaqueles_productos'))
         self._prod_arrastre = None   # (producto, esquina) agarrada
+
+        # Regla manual para medir en píxeles de la imagen (2-oct-2026). Su
+        # lógica vive en `regla_pixeles.py`. Nace apagada; mientras está
+        # encendida, arrastrar MIDE en vez de mover puntos de las zonas.
+        self.regla = ReglaPixeles()
 
         # Qué conjunto de puntos edita el mouse:
         # 'roi' | 'order' | 'delivery' | 'personal'
@@ -529,6 +535,14 @@ class Interactive_imageLabel(QLabel):
     def paintEvent(self, event):
         super().paintEvent(event)
 
+        # La regla ANTES de las salidas tempranas de abajo: tiene que verse
+        # aunque no haya ninguna zona activa ni puntos visibles.
+        if self.regla.p0 is not None:
+            p_regla = QPainter(self)
+            p_regla.setRenderHint(QPainter.Antialiasing)
+            self.regla.pintar(p_regla, self._escalar_xy)
+            p_regla.end()
+
         if self.points_hidden:
             return
         any_visible = (self.show_points or self.order_zone_active
@@ -694,6 +708,13 @@ class Interactive_imageLabel(QLabel):
                 or self._anq_vert != -1 or self._prod_arrastre is not None)
 
     def mousePressEvent(self, event: QMouseEvent):
+        # La regla, lo PRIMERO y aunque no haya zonas activas: con ella
+        # encendida, arrastrar mide y no edita nada.
+        if self.regla.activa and event.button() == Qt.LeftButton:
+            p = self.get_percentage_point(event.pos())
+            self.regla.empezar(p.x(), p.y())
+            self.update()
+            return
         if not self._interactive():
             return super().mousePressEvent(event)
         if event.button() == Qt.LeftButton:
@@ -744,6 +765,11 @@ class Interactive_imageLabel(QLabel):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self.regla.arrastrando:
+            p = self.get_percentage_point(event.pos())
+            self.regla.mover(p.x(), p.y())
+            self.update()
+            return
         if not self._interactive():
             return super().mouseMoveEvent(event)
         if self.flecha_index != -1 and event.buttons() & Qt.LeftButton:
@@ -829,6 +855,10 @@ class Interactive_imageLabel(QLabel):
         super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        if self.regla.arrastrando and event.button() == Qt.LeftButton:
+            self.regla.terminar()
+            self.update()
+            return
         if not self._interactive():
             return super().mouseReleaseEvent(event)
         if event.button() == Qt.LeftButton and self.flecha_index != -1:

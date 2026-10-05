@@ -425,6 +425,11 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self.imagen_label.anaqueles_change.connect(self.save_anaqueles)
         self.imagen_label.productos_change.connect(self.save_productos)
         self.conectar_puerta(self.imagen_label)
+        # La regla mide en píxeles de la imagen que se manda al servidor
+        # (`image_w`/`image_h` los actualiza cada frame), no en los de la
+        # pantalla: así se compara tal cual con los umbrales del servidor.
+        self.imagen_label.regla.tamano_frame = (
+            lambda: (self.image_w, self.image_h))
         self.imagen_label.setAlignment(Qt.AlignCenter)
         self.imagen_label.installEventFilter(self)
         self.stack.addWidget(self.imagen_label)
@@ -1146,6 +1151,13 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self._munecas_boolean = not self._munecas_boolean
         self._save_all("munecas_boolean", self._munecas_boolean)
 
+    def _toggle_regla(self):
+        regla = self.imagen_label.regla
+        regla.activa = not regla.activa
+        if not regla.activa:
+            regla.borrar()          # al apagarla, la línea se va con ella
+        self.imagen_label.update()
+
     def _toggle_telemetria_ciclo(self):
         if self._telemetria.activa:
             self._telemetria.apagar()
@@ -1265,6 +1277,11 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                          self._toggle_telemetria_ciclo)
         ruta = menu.addAction(f"   → {_telemetria.ruta_por_defecto()}")
         ruta.setEnabled(False)
+        # Regla para medir a la gente del fondo en píxeles de la imagen.
+        # No se guarda: es una herramienta de un momento, y encendida
+        # bloquea la edición de las zonas.
+        self._add_toggle(menu, "Regla: medir en píxeles (clic y arrastrar)",
+                         self.imagen_label.regla.activa, self._toggle_regla)
         self._add_toggle(menu, "Cajas estilo elipse",
                          self.ellipse_style, self._toggle_box_style)
 
