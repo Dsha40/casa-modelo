@@ -1134,6 +1134,7 @@ class MedidorAnaqueles:
             # lado: 'izq'/'der' de la pose v3; '?' si un doble de prueba
             # viejo devuelve tuplas de 3 (una sola máquina, como antes).
             vistos: Dict[str, Tuple[float, float]] = {}
+            munecas = _una_mano_si_coinciden(munecas, ancho_bbox)
             for m in munecas:
                 lado = m[3] if len(m) > 3 else '?'
                 vistos[lado] = (float(m[0]), float(m[1]))
@@ -1266,6 +1267,14 @@ class MedidorAnaqueles:
                             if viaje < amplitud_frac * ancho_bbox:
                                 self._anotar_descarte('agarre_amplitud')
                                 continue
+                        if est.get('fuera_arriba'):
+                            # La mano partió de DENTRO de un área de arriba:
+                            # es la vuelta de ese agarre, no uno aquí. Hay
+                            # que salir de verdad y volver a entrar.
+                            est['armado'] = False
+                            est['dentro'] = 0
+                            self._anotar_descarte('agarre_bajada')
+                            continue
                         if (t - self._agarre_ts.get(clave, -1e12)) \
                                 < cooldown:
                             continue
@@ -1307,6 +1316,8 @@ class MedidorAnaqueles:
                             est['fuera_prof'] = prof
                             est['fuera_box'] = tuple(float(v)
                                                      for v in box[:4])
+                            est['fuera_arriba'] = self._en_area_de_arriba(
+                                idx, lado, prof_de, ancho_bbox)
                         est['fuera_ts'] = t
                         if est['fuera'] >= rearme:
                             est['armado'] = True
@@ -1320,6 +1331,30 @@ class MedidorAnaqueles:
             if (t - pend['t']) > 2.0:
                 del self._agarre_pendiente[llave]
                 self._confirmar_agarre(pend, demografia)
+
+    def _en_area_de_arriba(self, idx: int, lado: str,
+                           prof_de: Dict[Tuple[int, str], float],
+                           ancho_bbox: float) -> bool:
+        """¿Está la muñeca `lado` DENTRO de un área que queda por ENCIMA de
+        `idx` (centro vertical de su caja más arriba en la imagen)?
+
+        Para `idx` esa mano está «fuera», y el gesto de BAJAR de ahí a la
+        cintura parecía un agarre en `idx` (6-oct-2026, vídeo de la cámara
+        3: la clienta coge de la balda alta y deja las manos delante de la
+        de abajo; el usuario revisó el vídeo y no cogió nada abajo). Subir
+        no cambia: el origen de un agarre de arriba es la cintura, que cae
+        en el área de ABAJO, no en una de encima."""
+        if idx >= len(self._cajas_area):
+            return False
+        cy = (self._cajas_area[idx][1] + self._cajas_area[idx][3]) / 2.0
+        for (j, l), prof in prof_de.items():
+            if l != lado or j == idx or j >= len(self._cajas_area):
+                continue
+            caja = self._cajas_area[j]
+            if (caja[1] + caja[3]) / 2.0 < cy and \
+                    prof >= self._profundidad_efectiva(ancho_bbox, j):
+                return True
+        return False
 
     def _confirmar_agarre(self, pend: Dict[str, Any],
                           demografia: Any) -> None:
@@ -1909,6 +1944,35 @@ def _hora(ts: float) -> str:
 def _corto(pid: str) -> str:
     pid = str(pid)
     return pid[-4:] if len(pid) > 4 else pid
+
+
+#: Dos muñecas a menos de esto (fracción del ancho de la persona, nunca
+#: menos de 8 px) son la MISMA mano. Ver `_una_mano_si_coinciden`.
+_MISMA_MANO_FRAC = 0.05
+
+
+def _una_mano_si_coinciden(munecas: List, ancho_bbox: float) -> List:
+    """Si la izquierda y la derecha caen en el mismo punto, se queda solo
+    la de más confianza (6-oct-2026).
+
+    Cuando ViTPose ve UNA sola mano, a veces le pone las DOS etiquetas: en
+    el vídeo de la cámara 3 (11:07:16 del 6-oct, grabado y reproducido) la
+    muñeca izquierda colgaba al costado (y ≈ 800) y, de una imagen a la
+    siguiente, apareció encima de la derecha (a 1-3 px, confianza 0,30-0,63
+    frente a 0,9). Para la máquina del gesto eso era una mano que subía
+    443 px y entraba en el área de abajo: un agarre falso (el usuario
+    revisó el vídeo: la clienta solo cogió de la balda de arriba). Dos
+    manos juntas cogiendo algo siguen dando el agarre: cuenta la buena.
+    """
+    if len(munecas) != 2:
+        return munecas
+    a, b = munecas
+    if len(a) < 4 or len(b) < 4 or a[3] == b[3]:
+        return munecas
+    umbral = max(8.0, _MISMA_MANO_FRAC * float(ancho_bbox))
+    if ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 >= umbral:
+        return munecas
+    return [a if a[2] >= b[2] else b]
 
 
 def crear(**kwargs: Any) -> Anaqueles:

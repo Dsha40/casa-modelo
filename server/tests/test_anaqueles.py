@@ -513,11 +513,15 @@ def test_V3_transito_apilado_cuenta_solo_donde_se_asienta(tmp_path):
     """Un reach que ATRAVIESA el nivel de abajo camino al de arriba
     contaba en los dos. v3: el conteo queda pendiente un frame y se
     arbitra — solo cuenta donde la mano se asienta."""
-    area_baja = [[100, 100], [300, 100], [300, 200], [100, 200]]
-    area_alta = [[100, 210], [300, 210], [300, 310], [100, 310]]
-    guion = ([[(400, 150, 0.9, 'der')]] * 2       # fuera: arma
-             + [[(150, 150, 0.9, 'der')]] * 2     # atraviesa el nivel bajo
-             + [[(150, 260, 0.9, 'der')]] * 5)    # se asienta en el alto
+    # La balda ALTA más arriba en la imagen (y menor), como en la tienda.
+    # Hasta el 6-oct estaban al revés; desde la regla de la «bajada» (una
+    # mano que viene de DENTRO de un área de encima no agarra abajo,
+    # `test_anaqueles_bajada.py`) ese dibujo era otro gesto: bajar.
+    area_baja = [[100, 210], [300, 210], [300, 310], [100, 310]]
+    area_alta = [[100, 100], [300, 100], [300, 200], [100, 200]]
+    guion = ([[(400, 260, 0.9, 'der')]] * 2       # fuera: arma
+             + [[(150, 260, 0.9, 'der')]] * 2     # atraviesa el nivel bajo
+             + [[(150, 150, 0.9, 'der')]] * 5)    # se asienta en el alto
     m = _medidor(tmp_path, pose=PoseSecuencia(guion))
     m.poner_zonas([area_baja, area_alta], ['Anaquel 1', 'Anaquel 2'])
     t0 = MEDIODIA
