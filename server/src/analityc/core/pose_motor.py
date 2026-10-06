@@ -31,7 +31,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 
@@ -168,6 +168,59 @@ class _MotorViTPose:
                     for (x, y), c in zip(kps, conf)]
         except Exception as exc:                            # noqa: BLE001
             logger.debug("pose: ViTPose falló: %s", exc)
+            return None
+
+
+    def keypoints_lote(self, frame_bgr: np.ndarray,
+                       cajas: List[Tuple[int, int, int, int]]
+                       ) -> Optional[List[Optional[List[List[float]]]]]:
+        """Los 17 keypoints de VARIAS personas del mismo frame en UNA
+        llamada al modelo, con los recortes preparados en la GPU
+        (`pose_gpu.py`, 6-oct-2026). `cajas` = (x1, y1, x2, y2) enteros ya
+        dentro del frame; cada resultado va en coordenadas de SU recorte,
+        igual que `keypoints_17(recorte)`.
+
+        None si no se puede (sin CUDA, interruptor apagado o fallo): quien
+        llama vuelve entonces a `keypoints_17` persona a persona.
+        """
+        from . import pose_gpu
+        self._cargar_si_falta()
+        if (self._modelo is None or self._procesador is None or not cajas
+                or 'cuda' not in str(self._dispositivo)
+                or not pose_gpu.activado()):
+            return None
+        try:
+            import torch
+            pv = pose_gpu.preparar(frame_bgr, cajas,
+                                   self._procesador.image_mean,
+                                   self._procesador.image_std,
+                                   self._dispositivo, self._fp16)
+            with torch.inference_mode():
+                salida = self._modelo(pixel_values=pv)
+            if self._fp16:
+                salida.heatmaps = salida.heatmaps.float()
+            # Una «imagen» por recorte, con su caja = el recorte entero: así
+            # el posproceso devuelve coordenadas del recorte, como antes.
+            coco = [[[0.0, 0.0, float(x2 - x1), float(y2 - y1)]]
+                    for x1, y1, x2, y2 in cajas]
+            res = self._procesador.post_process_pose_estimation(
+                salida, boxes=coco)
+            todos: List[Optional[List[List[float]]]] = []
+            for r in res:
+                kps = r[0]['keypoints'].detach().float().cpu().numpy()
+                conf = r[0]['scores'].detach().float().cpu().numpy() \
+                    .reshape(-1)
+                if kps.shape[0] != 17 or conf.shape[0] != 17:
+                    todos.append(None)
+                    continue
+                todos.append([[float(x), float(y), float(c)]
+                              for (x, y), c in zip(kps, conf)])
+            return todos
+        except Exception as exc:                            # noqa: BLE001
+            _avisar_una_vez(
+                'lote', logging.WARNING,
+                "pose: la preparación en la GPU falló (%s); se vuelve a la "
+                "CPU persona a persona", exc)
             return None
 
 

@@ -1100,8 +1100,16 @@ class MedidorAnaqueles:
             key=lambda kv: -((kv[1][1][2] - kv[1][1][0])
                              * (kv[1][1][3] - kv[1][1][1])))[:maximo]
 
-        for pid, (tid, box, areas_de_pid) in orden:
-            munecas = self.pose.munecas(frame, box)
+        # Todas las personas en UNA llamada al modelo, con los recortes
+        # preparados en la GPU (6-oct-2026, `pose_gpu.py`): con 2-3 personas
+        # junto al estante el agarre bajaba a ~7 fps. Los dobles de prueba
+        # sin `munecas_lote` siguen persona a persona.
+        lote = getattr(self.pose, 'munecas_lote', None)
+        cajas_orden = [box for _pid, (_tid, box, _a) in orden]
+        todas = (lote(frame, cajas_orden) if lote is not None and orden
+                 else [self.pose.munecas(frame, b) for b in cajas_orden])
+
+        for (pid, (tid, box, areas_de_pid)), munecas in zip(orden, todas):
             if _DIAG:
                 logger.info(
                     "anaqueles-diag[%s] t=%.2f pid=%s tid=%s areas=%s "

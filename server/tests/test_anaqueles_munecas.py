@@ -46,6 +46,9 @@ def _medidor(tmp_path, munecas):
     m = MedidorAnaqueles(f'cam-{tmp_path.name}', cargar_config(''), device=None)
     m.poner_zonas([_AREA], ['Anaquel 1'])
     m.pose.munecas = lambda frame, box: list(munecas)
+    # Desde el 6-oct el medidor pide todas las personas a la vez
+    # (`munecas_lote`, pose_gpu.py): se sustituye también.
+    m.pose.munecas_lote = lambda frame, boxes: [list(munecas) for _ in boxes]
     return m
 
 

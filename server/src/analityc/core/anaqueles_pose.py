@@ -95,9 +95,48 @@ class PoseMunecas:
         except Exception as exc:                            # noqa: BLE001
             logger.debug("anaqueles: pose falló: %s", exc)
             return []
+        return self._de_kps(kps, origen)
+
+    def munecas_lote(self, frame: np.ndarray,
+                     boxes: Sequence[Sequence[float]]
+                     ) -> List[List[Tuple[float, float, float, str]]]:
+        """`munecas` de varias personas del mismo frame, en UNA llamada al
+        modelo y con los recortes preparados en la GPU (6-oct-2026,
+        `pose_gpu.py`). Mismo resultado que llamar a `munecas` caja a caja
+        (medido sobre 298 fotos de fichas: muñecas a ≤ 0,23 px). Si el
+        motor no puede (sin CUDA, interruptor `ELDE_POSE_PREPARAR_EN_GPU=0`
+        o fallo), se hace caja a caja como siempre. Nunca lanza."""
+        boxes = list(boxes)
+        self._cargar_si_falta()
+        if self._modelo is None:
+            return [[] for _ in boxes]
+        cajas: List[Tuple[int, int, int, int]] = []
+        indices: List[int] = []
+        for i, box in enumerate(boxes):
+            c = self._caja_recorte(frame, box)
+            if c is not None:
+                cajas.append(c)
+                indices.append(i)
+        lote_fn = getattr(self._modelo, 'keypoints_lote', None)
+        todos = None
+        if cajas and lote_fn is not None:
+            try:
+                todos = lote_fn(frame, cajas)
+            except Exception as exc:                        # noqa: BLE001
+                logger.debug("anaqueles: pose en lote falló: %s", exc)
+        if todos is None or len(todos) != len(cajas):
+            return [self.munecas(frame, b) for b in boxes]
+        salida: List[List[Tuple[float, float, float, str]]] = [
+            [] for _ in boxes]
+        for i, c, kps in zip(indices, cajas, todos):
+            salida[i] = self._de_kps(kps, (c[0], c[1]))
+        return salida
+
+    def _de_kps(self, kps, origen: Tuple[int, int]
+                ) -> List[Tuple[float, float, float, str]]:
+        """Muñecas fiables de 17 keypoints del recorte, en coords del frame."""
         if not kps:
             return []
-
         ox, oy = origen
         salida: List[Tuple[float, float, float, str]] = []
         for idx, lado in ((MUNECA_IZQ, 'izq'), (MUNECA_DER, 'der')):
@@ -129,15 +168,26 @@ class PoseMunecas:
                          exc)
 
     @staticmethod
-    def _recorte(frame: np.ndarray, box: Sequence[float]
-                 ) -> Tuple[Optional[np.ndarray], Tuple[int, int]]:
+    def _caja_recorte(frame: np.ndarray, box: Sequence[float]
+                      ) -> Optional[Tuple[int, int, int, int]]:
+        """La caja ya recortada al frame, o None si queda muy chica. La
+        misma regla para el camino de siempre y el del lote."""
         try:
             x1, y1, x2, y2 = [int(v) for v in box[:4]]
             h, w = frame.shape[:2]
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
             if x2 - x1 < _MIN_ANCHO or y2 - y1 < _MIN_ALTO:
-                return None, (0, 0)
-            return frame[y1:y2, x1:x2].copy(), (x1, y1)
+                return None
+            return x1, y1, x2, y2
         except Exception:                                   # noqa: BLE001
+            return None
+
+    @classmethod
+    def _recorte(cls, frame: np.ndarray, box: Sequence[float]
+                 ) -> Tuple[Optional[np.ndarray], Tuple[int, int]]:
+        c = cls._caja_recorte(frame, box)
+        if c is None:
             return None, (0, 0)
+        x1, y1, x2, y2 = c
+        return frame[y1:y2, x1:x2].copy(), (x1, y1)
