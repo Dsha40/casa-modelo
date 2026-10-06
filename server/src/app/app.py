@@ -104,6 +104,14 @@ async def lifespan(app: FastAPI):
     # El registro de dispositivos se acumula entre arranques: sin esto, cada
     # reinicio del servidor perderia el historico de que camaras existen.
     _registro.cargar()
+    # Cronómetro por etapas, imagen a imagen (6-oct-2026, diagnóstico): sin
+    # ELDE_TIEMPOS_ETAPAS no hace nada. Aquí y no al importar: tiene que
+    # envolver `_full_frame_sync` ANTES de que una conexión la tome.
+    try:
+        from ..analityc.core import tiempos_etapas
+        tiempos_etapas.instalar()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("tiempos_etapas no disponible: %s", exc)
     # Baliza de descubrimiento (UDP): responde a los clientes que preguntan
     # "¿que servidores ELDE hay en esta red?". El puerto real lo pone quien
     # arranca uvicorn (iniciar_servidor_headless.py exporta ELDE_PUERTO_
