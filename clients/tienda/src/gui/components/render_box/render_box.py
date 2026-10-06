@@ -692,6 +692,7 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self.smart_mode    = False
         self.btn_smart.setChecked(False)
         self.btn_smart.setStyleSheet("background-color:#BFBFBF;")
+        self.olvidar_captura_guardada()
         self.can_send_next_frame = True
         self.text_fps.setText("FPS: 0")
 
@@ -1520,6 +1521,7 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
 
     def activate_modesmart(self):
         self.smart_mode = not self.smart_mode
+        self.olvidar_captura_guardada()
         self._save_all("inference_play", self.smart_mode)
         if self.smart_mode:
             self.btn_smart.setStyleSheet("background-color:#FF0000;")
@@ -1567,6 +1569,7 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         # permanente del recuadro: dejarla en True lo inutilizaba para
         # el siguiente lanzamiento.
         self.stop = False
+        self.olvidar_captura_guardada()
         self.can_send_next_frame = True
         self.current_pixmap = None
         self.image_w = 0
@@ -1668,13 +1671,13 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         return _munecas.vigentes(self._munecas_ultimas, self._munecas_ts,
                                  time.time())
 
-    def _try_supervision_overlay(self, detections):
+    def _try_supervision_overlay(self, detections, jpeg=None):
         """Anota con Supervision (cajas/estelas/zonas/heatmap). True si lo logro;
         False -> el caller cae al dibujo con QPainter."""
         if self._sv_overlay is None or cv2 is None or np is None:
             return False
         try:
-            arr = np.frombuffer(self._pending_frame_bytes, dtype=np.uint8)
+            arr = np.frombuffer(jpeg or self._pending_frame_bytes, dtype=np.uint8)
             frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)  # BGR
             if frame is None:
                 return False
@@ -1692,19 +1695,24 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             print(f"sv overlay error (fallback QPainter): {e}")
             return False
 
-    def _draw_detections_and_show(self, detections):
+    def _draw_detections_and_show(self, detections, jpeg=None):
         """MODO DIRECTO: dibuja las detecciones del servidor sobre el frame que
-        el cliente envio (_pending_frame_bytes) y lo muestra. Usa Supervision
+        el cliente envio y lo muestra. Usa Supervision
         (cajas redondeadas + etiquetas + estelas + zonas + heatmap) si esta
         disponible; si no, cae al dibujo simple con QPainter. Las coords vienen
         en pixeles del frame enviado -> se dibujan a esa resolucion y luego se
-        escala todo al label (alineado)."""
-        if not self._pending_frame_bytes:
+        escala todo al label (alineado).
+
+        `jpeg`: el frame de ESTA respuesta. Desde el 5-oct-2026 la siguiente
+        imagen se envia antes de pintar, y `_pending_frame_bytes` ya es la
+        nueva: sin esto las cajas irian sobre la imagen equivocada."""
+        jpeg = jpeg or self._pending_frame_bytes
+        if not jpeg:
             return
-        if self._try_supervision_overlay(detections):
+        if self._try_supervision_overlay(detections, jpeg):
             return
         pixmap = QPixmap()
-        if not pixmap.loadFromData(self._pending_frame_bytes, "JPEG"):
+        if not pixmap.loadFromData(jpeg, "JPEG"):
             return
         try:
             painter = QPainter(pixmap)
@@ -1827,11 +1835,22 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             # conexion con 1011 'keepalive ping timeout' cada ~3 minutos
             # (diagnostico del 7-ago-2026; ver server/src/app/ws_drenaje.py).
             return
-        tel = self._telemetria if self._telemetria.en_vuelo() else None
+        # Apartado: el siguiente fotograma puede abrirse antes de pintar este.
+        tel = self._telemetria.apartar() if self._telemetria.en_vuelo() else None
         if tel is not None:
             tel.marcar('t_respuesta')
         estado_tel = 'error'
+        # La imagen de ESTA respuesta: enviar la siguiente sobrescribe
+        # `_pending_frame_bytes`, y las cajas irian sobre la imagen equivocada.
+        frame_respuesta = self._pending_frame_bytes
+        enviada = False
         try:
+            # Tarea 2 (5-oct-2026): la captura guardada sale YA, antes de
+            # pintar esta respuesta. El servidor trabaja en ella mientras el
+            # cliente pinta (~17 ms) y no se espera a la captura siguiente
+            # (~20 ms de media en modo G). Sigue habiendo UNA en vuelo.
+            self.can_send_next_frame = True
+            enviada = self.enviar_captura_guardada()
             metadata  = message.get("data", {}).get("metadata", {})
             if metadata:
 
@@ -1888,7 +1907,7 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                     self.update_streaming_frame(proc_img, type_image="base64", tets=False)
                 elif detections is not None:
                     # Modo DIRECTO: dibujar las detecciones sobre el frame enviado.
-                    self._draw_detections_and_show(detections)
+                    self._draw_detections_and_show(detections, frame_respuesta)
                 if tel is not None:
                     tel.marcar('t_pintado')
                     tel.dato('personas', len(detections or []))
@@ -1908,15 +1927,20 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         finally:
             if tel is not None:
                 tel.cerrar(estado_tel)
-            self.can_send_next_frame = True
+            # Si ya salio la siguiente, esta en vuelo: no liberar el envio
+            # (serian dos en vuelo, y la cola del servidor no lo espera).
+            if not enviada:
+                self.can_send_next_frame = True
 
     def reconnect_socket(self, data):
+        self.olvidar_captura_guardada()
         self.can_send_next_frame = True
         self.btn_smart.setEnabled(True)
         self.loop_show_result()
         self._sync_vlm_model()
 
     def diconect_socket(self, data):
+        self.olvidar_captura_guardada()
         self.btn_smart.setEnabled(False)
 
     def _set_establecimiento(self, nombre):

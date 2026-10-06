@@ -489,6 +489,48 @@ class CapturaDVRMixin:
         except Exception:
             pass          # avisar nunca puede tumbar la captura
 
+    def _enviar_captura(self, data, image_bytes, header, t_recibido,
+                        descartes, tel):
+        """Envia una captura de la ventana al servidor (una en vuelo)."""
+        if tel is not None:
+            tel.descartados += descartes
+            tel.abrir(self._device_id(), 'ventana',
+                      t_captura=_telemetria.epoch_de_cabecera(header),
+                      t_recibido=t_recibido)
+            tel.dato('bytes', len(image_bytes))
+        # Modo directo: guardar el frame enviado para dibujar encima las
+        # detecciones que devuelva el servidor.
+        self._pending_frame_bytes = image_bytes
+        self.socket.send_binary_frame(self.component_key, data)
+        self.can_send_next_frame = False
+        if tel is not None:
+            tel.marcar('t_envio')
+
+    def enviar_captura_guardada(self) -> bool:
+        """Envia YA la captura guardada mientras habia una en vuelo, si la hay
+        y se puede enviar (tarea 2, 5-oct-2026). True si envio.
+
+        Se llama al llegar la respuesta, ANTES de pintarla: asi el servidor
+        trabaja en la siguiente mientras el cliente pinta, y no se espera a
+        la captura siguiente. Llamada directa y no `loop_show_result`: esa
+        recursion se quito por reentrancia (ver mas abajo)."""
+        guardada = getattr(self, '_captura_guardada', None)
+        if (guardada is None or not self.smart_mode
+                or not self.can_send_next_frame or self.socket is None):
+            return False
+        self._captura_guardada = None
+        data, image_bytes, header, t_recibido = guardada
+        tel = getattr(self, '_telemetria', None)
+        if tel is not None and not tel.activa:
+            tel = None
+        self._enviar_captura(data, image_bytes, header, t_recibido, 0, tel)
+        return True
+
+    def olvidar_captura_guardada(self) -> None:
+        """Al parar, apagar la IA o perder la conexion: no enviar despues una
+        captura vieja."""
+        self._captura_guardada = None
+
     def loop_show_result(self):
         if not self.process:
             return
@@ -580,25 +622,24 @@ class CapturaDVRMixin:
                     "min_permanencia_vehiculos": getattr(
                         self, "min_perm_vehiculos", None),
                 }
+                previa = getattr(self, '_captura_guardada', None)
                 if self.smart_mode and self.can_send_next_frame:
+                    # Los intermedios del mismo lote, y la guardada si la
+                    # habia, se tiran: va la mas reciente.
+                    self._captura_guardada = None
+                    self._enviar_captura(
+                        data, image_bytes, header, t_recibido,
+                        completos - 1 + (previa is not None), tel)
+                elif self.smart_mode:
+                    # Con una en vuelo, la ultima se GUARDA en vez de tirarse
+                    # (tarea 2, 5-oct-2026): al llegar la respuesta se envia
+                    # ANTES de pintar (`enviar_captura_guardada`). Antes se
+                    # esperaba a la captura SIGUIENTE: ~20 ms de media con el
+                    # servidor en modo G.
+                    self._captura_guardada = (data, image_bytes, header,
+                                              t_recibido)
                     if tel is not None:
-                        # Los intermedios del mismo lote tambien se tiran.
-                        tel.descartados += completos - 1
-                        tel.abrir(self._device_id(), 'ventana',
-                                  t_captura=_telemetria.epoch_de_cabecera(header),
-                                  t_recibido=t_recibido)
-                        tel.dato('bytes', len(image_bytes))
-                    # Modo directo: guardar el frame enviado para dibujar
-                    # encima las detecciones que devuelva el servidor.
-                    self._pending_frame_bytes = image_bytes
-                    self.socket.send_binary_frame(self.component_key, data)
-                    self.can_send_next_frame = False
-                    if tel is not None:
-                        tel.marcar('t_envio')
-                elif self.smart_mode and tel is not None:
-                    # Imagenes que el worker entrego mientras habia una en
-                    # vuelo: el tiempo que la captura YA trabaja en paralelo.
-                    tel.descartados += completos
+                        tel.descartados += completos - 1 + (previa is not None)
 
                 # Con IA el display llega desde la respuesta del servidor
                 # (on_text_message_received -> update_streaming_frame); sin IA

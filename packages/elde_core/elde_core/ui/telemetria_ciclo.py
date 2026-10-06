@@ -144,6 +144,30 @@ def epoch_de_cabecera(header: Any) -> Optional[float]:
         return None
 
 
+class Apartado:
+    """Un fotograma ya respondido que se sigue marcando aparte (ver
+    `TelemetriaCiclo.apartar`). Mismas `marcar`, `dato` y `cerrar`."""
+
+    def __init__(self, registro: Dict[str, Any], salida: EscritorJsonl):
+        self._registro: Optional[Dict[str, Any]] = registro
+        self._salida = salida
+
+    def marcar(self, nombre: str, t: Optional[float] = None) -> None:
+        if self._registro is not None:
+            self._registro[nombre] = round(time.time() if t is None else t, 4)
+
+    def dato(self, nombre: str, valor: Any) -> None:
+        if self._registro is not None:
+            self._registro[nombre] = valor
+
+    def cerrar(self, estado: str) -> None:
+        if self._registro is None:
+            return
+        registro, self._registro = self._registro, None
+        registro['estado'] = estado
+        self._salida.escribir(registro)
+
+
 class TelemetriaCiclo:
     """Las marcas de UN recuadro. Un fotograma en vuelo a la vez, como el
     propio recuadro: `abrir` empieza uno y `cerrar` lo escribe.
@@ -188,6 +212,16 @@ class TelemetriaCiclo:
 
     def en_vuelo(self) -> bool:
         return self._actual is not None
+
+    def apartar(self) -> Optional['Apartado']:
+        """Saca el fotograma en vuelo SIN escribirlo, para seguir marcandolo
+        (paneles, pintado) mientras YA vuela el siguiente (5-oct-2026: el
+        recuadro envia la siguiente imagen ANTES de pintar la respuesta).
+        Sin esto, `abrir` del siguiente lo cerraria como 'sin_respuesta'."""
+        if self._actual is None:
+            return None
+        registro, self._actual = self._actual, None
+        return Apartado(registro, self._escritor())
 
     def cerrar(self, estado: str) -> None:
         if self._actual is None:

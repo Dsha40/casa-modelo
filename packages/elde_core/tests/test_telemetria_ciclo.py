@@ -130,12 +130,17 @@ def test_la_ruta_de_ventana_marca_captura_recibido_y_envio(tmp_path):
 
 
 def test_cuenta_las_imagenes_que_llegan_con_un_fotograma_en_vuelo(tmp_path):
-    """Son la prueba de que la captura ya trabaja en paralelo al servidor."""
+    """Son la prueba de que la captura ya trabaja en paralelo al servidor.
+
+    Desde el 5-oct-2026 (tarea 2) la ULTIMA que llega con una en vuelo se
+    guarda para enviarla al volver la respuesta: de dos, una se guarda y una
+    se tira. Al enviar la siguiente, la guardada (reemplazada) cuenta."""
     r, e = _recuadro_con_telemetria(tmp_path, {'x': 1})
     r.can_send_next_frame = False
     r.loop_show_result()
     r.loop_show_result()
-    assert r._telemetria.descartados == 2
+    assert r._telemetria.descartados == 1
+    assert r._captura_guardada is not None
     r.can_send_next_frame = True
     r.loop_show_result()
     r._telemetria.cerrar('ok')
