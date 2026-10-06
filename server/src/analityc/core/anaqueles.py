@@ -58,9 +58,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
-from . import anaqueles_grabador, anaqueles_productos, ritmo_imagenes
+from . import (anaqueles_grabador, anaqueles_productos, anaqueles_stock,
+               ritmo_imagenes)
 from .anaqueles_pose import PoseMunecas
-from .anaqueles_registro import GRID_DIM, RegistroAnaqueles
+from .anaqueles_registro import GRID_DIM, RegistroAnaqueles, raiz_salida
 from .estacionamiento_escena import DetectorEscena
 from .tiendas import TiendasProcess
 
@@ -214,6 +215,24 @@ _DEFECTOS: Dict[str, Any] = {
     # Dwell para «está surtiendo» (más largo que la visita de un cliente:
     # rozar el área caminando no es surtir).
     'surte_dwell_s': 3.0,
+    # Aviso de «posible agotado» tras un agarre (5-oct-2026,
+    # `anaqueles_stock.py`). El UMBRAL NO ESTÁ CALIBRADO: no hay todavía ni
+    # una balda vaciada de verdad, solo el vídeo. Cada medida sale en el log
+    # (`STOCK [...] cambio=...`) para ajustarlo.
+    'stock_umbral': 0.45,
+    # Mediciones seguidas por encima (alerta) o por debajo (sigue surtido).
+    'stock_confirmaciones': 3,
+    # Tras el agarre, cuánto esperar antes de mirar (la mano aún sale).
+    'stock_espera_s': 2.0,
+    # Si en este tiempo nadie deja ver el producto, se deja de vigilar.
+    'stock_ventana_s': 180.0,
+    'stock_muestreo_s': 1.0,
+    # Con la alerta puesta se mira menos a menudo: solo para ver si reponen.
+    'stock_muestreo_alerta_s': 5.0,
+    # Repuesto = cambio por debajo de umbral × esto (histéresis).
+    'stock_repuesto_frac': 0.6,
+    # La petición de foto de referencia caduca si siguen tapando el producto.
+    'stock_peticion_max_s': 120.0,
 }
 
 
@@ -276,6 +295,12 @@ class MedidorAnaqueles:
         #: los agarres del área; no deciden si hubo agarre.
         self._productos: Dict[int, List[anaqueles_productos.Producto]] = {}
         self._firma_productos: Any = None
+        #: «Posible agotado» tras un agarre (5-oct-2026). Sus fotos de
+        #: referencia van junto a los JSON del día de esta cámara.
+        # `getattr`: las pruebas inyectan registros de mentira sin carpeta.
+        self._stock = anaqueles_stock.VigilanteStock(
+            camera_id, getattr(self.registro, 'carpeta', None)
+            or Path(raiz_salida()) / str(camera_id), cfg)
 
         #: (área, pid) -> ts en que entró a la compuerta (estancia en curso).
         self._compuerta_desde: Dict[Tuple[int, str], float] = {}
@@ -495,6 +520,10 @@ class MedidorAnaqueles:
 
         self._munecas_frame = []
         personas = self._personas_de(tracks)
+        # Para recortar a quien agarra (la foto de la alerta de stock,
+        # 5-oct-2026): el agarre se confirma más abajo sin el frame a mano.
+        self._frame_actual = frame
+        self._cajas_tid = {tid: box for _p, tid, box in personas}
         # El PERSONAL enrolado se separa ANTES de medir: el marketing es
         # solo de clientes. Sus visitas/agarres no cuentan, no calientan el
         # mapa ni suman demografía; en su lugar generan alertas operativas.
@@ -511,6 +540,7 @@ class MedidorAnaqueles:
             # estable): la base real sobre la que se compone el calor.
             self._guardar_refs(frame, personas_por_area, personas,
                                personal, t)
+            self._vigilar_stock(frame, personas, personal, t)
         if personal:
             self._atender_personal(personal, t, medir_areas=medir)
 
@@ -1340,6 +1370,19 @@ class MedidorAnaqueles:
         except Exception as exc:                            # noqa: BLE001
             logger.debug("anaqueles: refs fallaron: %s", exc)
 
+    def _vigilar_stock(self, frame: np.ndarray, clientes: List,
+                       personal: List, t: float) -> None:
+        """«Posible agotado» (5-oct-2026, `anaqueles_stock.py`). Tapan el
+        producto tanto los clientes como el personal: los dos cuerpos."""
+        cuerpos =([b for _p, _tid, b in clientes]
+                   + [b for _p, _tid, b, _f in personal])
+        nombres = {i: self._nombre(i) for i in range(len(self._poligonos))}
+        self._stock.vigilar(frame, self._productos, nombres, cuerpos, t)
+        sucesos = self._stock.drenar_sucesos()
+        if sucesos:
+            self._feed.extend(sucesos)
+            self._feed_sucio = True
+
     def _calor(self, idx: int, x: float, y: float, peso: float) -> None:
         ax1, ay1, ax2, ay2 = self._cajas_area[idx]
         ancho = max(1.0, ax2 - ax1)
@@ -1366,9 +1409,33 @@ class MedidorAnaqueles:
         genero, rango = self._rasgos(demografia, tid)
         producto = self._repartir_a_producto(idx, x, y)
         self._evento('agarre', idx, pid, genero, rango, t, producto=producto)
+        # TODOS los productos del área, no solo `producto`: la muñeca no es
+        # la mano y el asignado cambia de una pasada a otra (hallazgo 25).
+        self._stock.tras_agarre(idx, t, persona=self._recorte_de(tid))
         logger.info("anaqueles[%s] AGARRE #%d en %s%s (%s)",
                     self.camera_id, total, self._nombre(idx),
                     f' → {producto}' if producto else '', _corto(pid))
+
+    def _recorte_de(self, tid: Any) -> Optional[np.ndarray]:
+        """Recorte (copia) de la persona `tid` en el frame actual, o None."""
+        try:
+            frame = getattr(self, '_frame_actual', None)
+            box = (getattr(self, '_cajas_tid', None) or {}).get(tid)
+            if frame is None or box is None:
+                return None
+            h, w = frame.shape[:2]
+            x1, y1 = max(0, int(box[0])), max(0, int(box[1]))
+            x2, y2 = min(w, int(box[2])), min(h, int(box[3]))
+            if x2 - x1 < 8 or y2 - y1 < 8:
+                return None
+            return frame[y1:y2, x1:x2].copy()
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def drenar_alertas_stock(self) -> List[Dict[str, Any]]:
+        """Alertas «posible agotado» con su foto (las convierte en alertas
+        del pipeline la clase Anaqueles, como las del personal)."""
+        return self._stock.drenar_alertas()
 
     def _repartir_a_producto(self, idx: int, x: Optional[float],
                              y: Optional[float]) -> Optional[str]:
@@ -1488,6 +1555,12 @@ class MedidorAnaqueles:
             bloque['eventos'] = list(self._feed)
             self._feed_sucio = False
 
+        # Stock: al cambiar algo y, además, con los contadores (un panel que
+        # se conecta tarde se pone al día).
+        if self._stock.cambio or 'areas' in bloque:
+            bloque['stock'] = self._stock.bloque()
+            self._stock.cambio = False
+
         if self._aviso_escena is not None:
             bloque['escena'] = self._aviso_escena
             self._aviso_escena = None
@@ -1565,6 +1638,7 @@ class Anaqueles(TiendasProcess):
                 metadata['anaqueles'] = bloque
             if self._medidor is not None:
                 self._alertar_personal(image, camera_id)
+                self._alertar_stock(camera_id)
                 self._etiquetar_personal(metadata)
         except Exception as exc:                            # noqa: BLE001
             # Nunca propaga: si la medición falla, el cliente debe seguir
@@ -1616,6 +1690,39 @@ class Anaqueles(TiendasProcess):
             if len(self._alertas_pendientes) > 200:
                 self._alertas_pendientes = self._alertas_pendientes[-100:]
             logger.info("Anaqueles[%s] %s", camara, descripcion)
+
+    def _alertar_stock(self, camera_id: Any) -> None:
+        """«Posible agotado» al panel de alertas del cliente (5-oct-2026),
+        por la misma vía que las del personal. La foto es el ANTES y el AHORA
+        del producto (el usuario la prefirió a la de la persona), y
+        `screenshot_path` = la evidencia antes | ahora | quién agarró, que la
+        tarjeta abre al pulsarla. El «lleva X» en vivo lo pinta el panel de
+        Anaqueles: la tarjeta es fija."""
+        camara = (getattr(self, '_camera_display_name', None)
+                  or str(camera_id))
+        for a in self._medidor.drenar_alertas_stock():
+            agarre = (f" Último agarre: {a['hora_agarre']}."
+                      if a.get('hora_agarre') else '')
+            alerta = {
+                'event_type': 'Posible agotado',
+                'class_name': str(a['producto']),
+                'description': (f"{a['producto']} en {a['area_nombre']} "
+                                f"({camara}): detectado a las {a['hora']} "
+                                f"(cambio {a['cambio']:.2f}).{agarre}"),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'camera_name': camara,
+                'crop_image': a['imagen_b64'],
+                'image_base64': a['imagen_b64'],
+                'screenshot_path': a['ruta'],
+                'clase_gruesa': 'stock',
+                'dedup_clave': (f"stock|{camara}|{a['area']}|"
+                                f"{a['producto_idx']}|{a['hora']}"),
+            }
+            if not hasattr(self, '_alertas_pendientes'):
+                self._alertas_pendientes = []
+            self._alertas_pendientes.append(alerta)
+            if len(self._alertas_pendientes) > 200:
+                self._alertas_pendientes = self._alertas_pendientes[-100:]
 
     def _etiquetar_personal(self, metadata: Dict[str, Any]) -> None:
         """Marca las cajas del personal en el modo directo.

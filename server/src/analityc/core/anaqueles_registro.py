@@ -231,6 +231,12 @@ class RegistroAnaqueles:
             for clave, a in self.areas.items()
         }
 
+    @property
+    def carpeta(self) -> Path:
+        """Carpeta de esta cámara (la usa `anaqueles_stock` para sus fotos
+        de referencia, 5-oct-2026)."""
+        return self._carpeta
+
     # ── Foto de referencia del área (14-ago) ────────────────────────────
     def guardar_ref(self, idx: int, imagen_bgr) -> None:
         """Foto del área VACÍA (el recorte exacto del bbox del polígono):

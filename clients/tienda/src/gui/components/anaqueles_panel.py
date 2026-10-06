@@ -45,6 +45,7 @@ VERDE = '#4caf50'      # visitas
 AMBAR = '#f0b429'      # avisos
 AZUL = '#58a6ff'       # personal de seguridad en pasillo
 VIOLETA = '#a371f7'    # empleado surtiendo el anaquel
+ROJO = '#f85149'       # posible agotado (5-oct-2026)
 
 #: Una cámara que lleva esto sin emitir se considera desconectada.
 CADUCIDAD_CAMARA_S = 20.0
@@ -124,6 +125,16 @@ class AnaquelesPanel(QWidget):
         self.lbl_aviso.hide()
         raiz.addWidget(self.lbl_aviso)
 
+        # «Posible agotado» (5-oct-2026, bloque['stock'] del servidor). Va
+        # aparte de los avisos ámbar: esos son de la cámara, esto es de la
+        # balda, y es lo que el encargado tiene que ver.
+        self.lbl_stock = QLabel('')
+        self.lbl_stock.setWordWrap(True)
+        self.lbl_stock.setStyleSheet(
+            f'color:{ROJO}; font-size:11px; font-weight:700;')
+        self.lbl_stock.hide()
+        raiz.addWidget(self.lbl_stock)
+
         # Personal enrolado a la vista AHORA (bloque['personal'] del
         # servidor): una línea discreta, no un aviso — que esté el pasillero
         # es lo normal.
@@ -170,6 +181,14 @@ class AnaquelesPanel(QWidget):
         self._timer.timeout.connect(self._repintar)
         self._timer.start()
 
+        # «Lleva X» de cada posible agotado, de segundo en segundo (5-oct-
+        # 2026, lo pidió el usuario). Solo reescribe ese letrero: el
+        # repintado entero sigue a su ritmo de 5 s.
+        self._timer_stock = QTimer(self)
+        self._timer_stock.setInterval(1000)
+        self._timer_stock.timeout.connect(self._refrescar_stock)
+        self._timer_stock.start()
+
     # ── Entrada ─────────────────────────────────────────────────────────
     @Slot(dict)
     def actualizar(self, bloque: Dict[str, Any]) -> None:
@@ -189,6 +208,12 @@ class AnaquelesPanel(QWidget):
                 estado['sin_areas'] = False
             if bloque.get('escena'):
                 estado['escena_ts'] = time.monotonic()
+            if 'stock' in bloque:
+                estado['stock'] = dict(bloque.get('stock') or {})
+                # Base del contador: el servidor manda los segundos que
+                # llevaba al emitir; desde aquí se suma con el reloj PROPIO
+                # (el del servidor puede ir en otra zona horaria).
+                estado['stock_ts'] = time.monotonic()
             # Personal a la vista: se guarda POR CÁMARA con un TTL propio de
             # 10 s (aplicado en _repintar), además de la caducidad de la
             # cámara: un servidor viejo no reemite la lista vacía al salir el
@@ -261,6 +286,8 @@ class AnaquelesPanel(QWidget):
         else:
             self.lbl_aviso.hide()
 
+        self._refrescar_stock(vivas)
+
         en_camara: List[str] = []
         for estado in vivas.values():
             # TTL propio del bloque de personal: el servidor nuevo ya emite
@@ -283,6 +310,14 @@ class AnaquelesPanel(QWidget):
 
         self._pintar_ranking(areas_todas, varias=len(vivas) > 1)
         self._pintar_feed()
+
+    def _refrescar_stock(self, vivas=None) -> None:
+        lineas = lineas_de_stock(self._vivas() if vivas is None else vivas)
+        if lineas:
+            self.lbl_stock.setText('\n'.join(lineas))
+            self.lbl_stock.show()
+        else:
+            self.lbl_stock.hide()
 
     def _pintar_ranking(self, areas: List[Dict[str, Any]],
                         varias: bool) -> None:
@@ -357,6 +392,16 @@ class AnaquelesPanel(QWidget):
                 color = VIOLETA
                 cuerpo = (f"📦 {ev.get('id_corto')} surte "
                           f"<b>{ev.get('nombre')}</b>")
+            elif tipo == 'agotado':
+                color = ROJO
+                cuerpo = (f"🛒 Posible agotado: <b>{ev.get('producto')}</b>"
+                          f" en {ev.get('nombre')}")
+            elif tipo == 'repuesto':
+                color = VERDE
+                estuvo = (f" (estuvo {duracion(ev['duracion_s'])})"
+                          if ev.get('duracion_s') is not None else '')
+                cuerpo = (f"✅ Repuesto: <b>{ev.get('producto')}</b>"
+                          f" en {ev.get('nombre')}{estuvo}")
             else:
                 color = NARANJA if tipo == 'agarre' else VERDE
                 verbo = 'agarró en' if tipo == 'agarre' else 'visitó'
@@ -371,6 +416,47 @@ class AnaquelesPanel(QWidget):
                 f"{cuerpo}")
             lbl.setStyleSheet('font-size:10px;')
             self._zona_feed.addWidget(lbl)
+
+
+def duracion(segundos: Any) -> str:
+    """«45 s», «2 min 05 s», «1 h 03 min» (el mismo formato que el log del
+    servidor, `anaqueles_stock._duracion`)."""
+    s = max(0, int(segundos or 0))
+    if s < 60:
+        return f'{s} s'
+    if s < 3600:
+        return f'{s // 60} min {s % 60:02d} s'
+    return f'{s // 3600} h {(s % 3600) // 60:02d} min'
+
+
+def lineas_de_stock(vivas: Dict[str, Dict[str, Any]],
+                    ahora: Optional[float] = None) -> List[str]:
+    """Texto del letrero de stock a partir del último `stock` de cada
+    cámara viva. Suelta de la clase para probarla sin pintar nada.
+
+    «lleva X» = los segundos que el servidor contaba al emitir
+    (`vacio_s`) + lo que ha pasado desde que llegaron, por el reloj
+    monotónico de este PC. Cuenta desde que se DETECTÓ, unos segundos
+    después del agarre. Un servidor anterior al contador no manda
+    `vacio_s`: entonces solo se dice la hora.
+    """
+    ahora = time.monotonic() if ahora is None else ahora
+    lineas: List[str] = []
+    varias = len(vivas) > 1
+    for cam, estado in vivas.items():
+        stock = estado.get('stock') or {}
+        prefijo = f"{estado.get('nombre', cam)} · " if varias else ''
+        pasado = max(0.0, ahora - float(estado.get('stock_ts') or ahora))
+        for a in (stock.get('alertas') or []):
+            lleva = (f" — lleva {duracion(a['vacio_s'] + pasado)}"
+                     if a.get('vacio_s') is not None else '')
+            lineas.append(f"🛒 {prefijo}Posible agotado: {a.get('producto')}"
+                          f" ({a.get('area_nombre')}){lleva}"
+                          f" (desde {a.get('desde')})")
+        if stock.get('esperando_foto'):
+            lineas.append(f"📷 {prefijo}Foto de referencia: esperando a que "
+                          f"nadie tape {stock['esperando_foto']} producto(s)")
+    return lineas
 
 
 def _vaciar(layout) -> None:

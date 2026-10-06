@@ -260,6 +260,39 @@ def heatmap_imagen(camera_id: str, area_idx: int,
     return Response(content=buf.tobytes(), media_type='image/png')
 
 
+# ── Stock: «posible agotado» tras un agarre (5-oct-2026) ────────────────
+# Excepción a «la fuente de verdad es el disco»: como `/frame`, esto mira el
+# pipeline VIVO (la petición la atiende el próximo frame de esa cámara). El
+# cruce entre hilos va por el candado de `anaqueles_stock`.
+@router.post('/{camera_id}/stock/referencia')
+def stock_referencia(camera_id: str) -> Dict[str, Any]:
+    """Pide la foto «surtido» de todos los productos de la cámara. Se toma
+    en cuanto nadie tape cada producto (como mucho, `stock_peticion_max_s`)."""
+    from ..analityc.core import anaqueles_stock
+    if not anaqueles_stock.pedir_referencia(camera_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f'la cámara {camera_id!r} no está midiendo en modo '
+                   f'Anaqueles ahora mismo. Vigiladas: '
+                   f'{anaqueles_stock.camaras_vigiladas() or "ninguna"}')
+    return {'status': 'ok', 'camera_id': camera_id,
+            'mensaje': 'Foto pedida: se toma de cada producto en cuanto '
+                       'nadie lo tape.'}
+
+
+@router.get('/{camera_id}/stock')
+def stock(camera_id: str) -> Dict[str, Any]:
+    """Referencias tomadas, productos vigilados y alertas activas."""
+    from ..analityc.core import anaqueles_stock
+    datos = anaqueles_stock.estado(camera_id)
+    if datos is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f'la cámara {camera_id!r} no está midiendo en modo '
+                   'Anaqueles ahora mismo.')
+    return datos
+
+
 # ── Interno ──────────────────────────────────────────────────────────────
 def _registro_o_404(camera_id: str, fecha: Optional[str]) -> Dict[str, Any]:
     datos = ultimo_registro(camera_id, fecha)

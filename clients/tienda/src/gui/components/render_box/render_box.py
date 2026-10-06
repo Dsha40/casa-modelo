@@ -1134,6 +1134,46 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             quitar = sub.addAction("Quitar ultimo producto",
                                    lambda *_, i=i: self._quitar_producto(i))
             quitar.setEnabled(bool(suyos))
+        # «Posible agotado» (5-oct-2026, servidor `anaqueles_stock.py`): la
+        # foto de referencia la pide el operador con la balda BIEN SURTIDA;
+        # el servidor no la renueva sola.
+        menu.addSeparator()
+        foto = menu.addAction("📷 Foto de referencia de stock (balda surtida)",
+                              lambda *_: self._foto_referencia_stock())
+        foto.setEnabled(bool(productos.productos))
+
+    def _foto_referencia_stock(self):
+        """Pide al servidor la foto «surtido» de todos los productos de esta
+        camara. Va por HTTP y no por el websocket: el payload lo comparten
+        otros clientes (GUIA 4.7) y esto es una orden suelta, no un dato de
+        cada frame."""
+        from urllib.parse import quote
+        try:
+            url = (f"{self._http_base()}/api/anaqueles/"
+                   f"{quote(str(self._device_id()), safe='')}"
+                   "/stock/referencia")
+        except Exception as e:
+            QMessageBox.warning(self, "Stock", f"Sin servidor: {e}")
+            return
+        self._stock_worker = _PostWorker(url, parent=self)
+        self._stock_worker.done.connect(self._on_foto_referencia_stock)
+        self._stock_worker.start()
+
+    @Slot(dict)
+    def _on_foto_referencia_stock(self, data):
+        if data.get("status") == "ok":
+            QMessageBox.information(
+                self, "Stock",
+                f"{data.get('mensaje', 'Foto pedida.')}\n\n"
+                "Hazla con la balda bien surtida. Tras cada agarre, el "
+                "servidor compara el producto con esta foto y avisa en el "
+                "panel de Anaqueles si parece agotado.")
+        else:
+            QMessageBox.warning(
+                self, "Stock",
+                "No se pudo pedir la foto: "
+                f"{data.get('detail') or data.get('message') or '?'}\n\n"
+                "¿La camara esta conectada en modo Anaqueles?")
 
     def _nombres_anaqueles(self):
         """Nombres paralelos a las zonas enviadas: la numeracion GLOBAL

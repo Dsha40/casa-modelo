@@ -32,6 +32,11 @@ from elde_core.ui.panel_alertas import Columna, PanelAlertas
 COLUMNAS = [
     Columna('visitantes', 'Visitantes', '👥', '#00a8e8'),
     Columna('capturas',   'Capturas',   '📸', '#2ecc71'),
+    # «Posible agotado» del modo Anaqueles (5-oct-2026, servidor
+    # `anaqueles_stock.py`): columna propia para que no se pierda entre los
+    # visitantes. La miniatura es quien agarró; al pulsar, la evidencia
+    # antes | ahora | persona.
+    Columna('stock',      'Stock',      '🛒', '#f85149'),
 ]
 
 # Eventos de la analitica de retail: ya no llegan (ver cabecera). Si vuelven,
@@ -51,6 +56,9 @@ def clasificar(alerta: dict) -> str:
 
     if 'captura' in texto:
         return 'capturas'
+    # Antes que `_EVENTOS_RETAIL`, que también dice «stock».
+    if 'agotado' in evento:
+        return 'stock'
     if any(p in texto for p in _EVENTOS_RETAIL):
         return 'visitantes'
     return 'visitantes'
