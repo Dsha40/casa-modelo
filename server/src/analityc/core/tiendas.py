@@ -25,6 +25,7 @@ from ..config.config import (
 # demografia y heatmap siguen intactos aguas abajo.
 from . import deteccion_compartida
 from . import filtro_fondo
+from . import ritmo_imagenes
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
 from .analytics.demographics import (DemographicsClassifier,
@@ -483,6 +484,16 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         if camera_id not in cache:
             cache[camera_id] = _load_camera_profile(camera_id)
         return cache[camera_id]
+
+    def _imagenes(self, imagenes: int) -> int:
+        """Un ajuste contado en IMAGENES, en tiempo real (5-oct-2026,
+        `ritmo_imagenes.py`): las mismas que hoy a ~7,7 fps, mas si esta
+        camara va mas rapido. Al subir de 7,7 a 9,9 fps las entradas al ROI
+        pasaron de 11 a 29 en el mismo trozo del video: borrar a quien sale
+        1 imagen del ROI, confirmar con 3, no recontar en 30... eran cada vez
+        menos tiempo. Los fps salen del ByteTrack de la camara en curso."""
+        return ritmo_imagenes.imagenes_ref(
+            imagenes, ritmo_imagenes.fps_de(getattr(self, '_byte_tracker', None)))
 
     def _make_byte_tracker(self, camera_id: Any = None):
         """Crea un sv.ByteTrack nuevo con los parametros de AnalyticsConfig.
@@ -1189,7 +1200,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
     def is_near_recent_counted(self, center: Tuple, threshold: int = 50) -> bool:
         for counted_id, counted_center, counted_frame in self.recent_counted_persons:
             distance = np.sqrt((center[0] - counted_center[0])**2 + (center[1] - counted_center[1])**2)
-            if distance < threshold and (self.frame_counter - counted_frame) < 30:
+            if distance < threshold and (self.frame_counter - counted_frame) < self._imagenes(30):
                 return True
         return False
 
@@ -1233,7 +1244,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             if not has_match:
                 track['frames_without_detection'] = track.get('frames_without_detection', 0) + 1
                 
-                if track['frames_without_detection'] >= self.max_frames_without_detection:
+                if track['frames_without_detection'] >= self._imagenes(self.max_frames_without_detection):
                     unmatched_tracks.append(track_id)
             else:
                 track['frames_without_detection'] = 0
@@ -1346,18 +1357,19 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 frames_in_roi = track.get('total_frames_in_roi', 0)
                 frames_out_roi = track.get('frames_out_roi', 0)
                 
-                if (frames_in_roi >= self.min_time_in_roi and 
-                    frames_out_roi >= 2 and
-                    track['seen_frames'] >= self.min_track_frames and
+                # En tiempo real, no en imagenes (`_imagenes`, 5-oct-2026).
+                if (frames_in_roi >= self._imagenes(self.min_time_in_roi) and
+                    frames_out_roi >= self._imagenes(2) and
+                    track['seen_frames'] >= self._imagenes(self.min_track_frames) and
                     not track.get('counted', False)):
                     
                     if not self.is_near_recent_counted(current_pos):
                         counted_in_frame.append(track_id)
                 
-                if track.get('has_been_inside', False) and track['frames_out_roi'] >= self.exit_frames_threshold:
+                if track.get('has_been_inside', False) and track['frames_out_roi'] >= self._imagenes(self.exit_frames_threshold):
                     tracks_to_remove.append(track_id)
-                
-                elif not track.get('has_been_inside', False) and track['frames_out_roi'] > self.max_frames_out:
+
+                elif not track.get('has_been_inside', False) and track['frames_out_roi'] > self._imagenes(self.max_frames_out):
                     tracks_to_remove.append(track_id)
         
         for track_id in tracks_to_remove:
@@ -1575,7 +1587,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     or AnalyticsConfig.DEMO_HYSTERESIS_ENABLED
                 )
                 if (_needs_classify
-                        and (self.frame_counter + track_id) % self._classify_every_n == 0
+                        and (self.frame_counter + track_id) % self._imagenes(self._classify_every_n) == 0
                         and hasattr(self, 'last_processed_frame')
                         and self.last_processed_frame is not None):
                     new_cat = self._classify_person(self.last_processed_frame, det['box'], track_id)
@@ -1721,7 +1733,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     or AnalyticsConfig.DEMO_HYSTERESIS_ENABLED
                 )
                 if (_needs_classify
-                        and (self.frame_counter + tid) % self._classify_every_n == 0
+                        and (self.frame_counter + tid) % self._imagenes(self._classify_every_n) == 0
                         and self.last_processed_frame is not None):
                     new_cat = self._classify_person(self.last_processed_frame, det['box'], tid)
                     if new_cat in ('Hombres', 'Mujeres', 'Ninos'):
@@ -1790,7 +1802,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             if tid not in current_botsort_ids:
                 track = self.active_tracks[tid]
                 track['frames_without_detection'] = track.get('frames_without_detection', 0) + 1
-                if track['frames_without_detection'] >= self.max_frames_without_detection:
+                if track['frames_without_detection'] >= self._imagenes(self.max_frames_without_detection):
                     stale_ids.append(tid)
 
         for tid in stale_ids:
@@ -1828,9 +1840,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         body = getattr(self, '_body_reidentifier', None)
         body_ok = (body is not None and body.is_available
                    and frame is not None and getattr(frame, 'size', 0) > 0)
-        _every = max(1, int(AnalyticsConfig.BODY_REID_EVERY_N))
+        # Cadencia y antiguedad en tiempo real, no en imagenes (`_imagenes`).
+        _every = max(1, self._imagenes(int(AnalyticsConfig.BODY_REID_EVERY_N)))
         _min_h = int(AnalyticsConfig.BODY_REID_MIN_CROP_H)
-        _min_seen = int(AnalyticsConfig.BODY_REID_MIN_SEEN_FRAMES)
+        _min_seen = self._imagenes(int(AnalyticsConfig.BODY_REID_MIN_SEEN_FRAMES))
         _links = 0
         for tid, track in self.active_tracks.items():
             uid = reid.get_persistent_id(tid) if reid_ok else None
@@ -2095,7 +2108,9 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         # maquina de zonas VACIA y el modo no medía nada, sin un solo error.
         require_conf = bool(getattr(self, '_zone_requiere_confirmado',
                                     AnalyticsConfig.ZONE_ENTRY_REQUIRES_CONFIRMED))
-        hyst = max(1, int(AnalyticsConfig.ZONE_HYSTERESIS_FRAMES))
+        # En tiempo real (`_imagenes`, 5-oct-2026): a 10 fps, 3 imagenes eran
+        # 0,3 s y quien estaba parado en el borde entraba y salia varias veces.
+        hyst = max(1, self._imagenes(int(AnalyticsConfig.ZONE_HYSTERESIS_FRAMES)))
 
         # 1) Observacion por persona desde los tracks activos (DENTRO si
         #    cualquiera de sus tracks tiene el pie en la zona).
@@ -2281,6 +2296,11 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     # falso-positivo).
                     if self._byte_tracker is None:
                         self._byte_tracker = self._make_byte_tracker(camera_id)
+                    # Memoria y confirmacion en SEGUNDOS con los fps reales
+                    # de esta camara, nunca menos que en imagenes
+                    # (`ritmo_imagenes.py`, 5-oct-2026).
+                    ritmo_imagenes.ajustar_bytetrack(
+                        self._byte_tracker, time.time(), _cfg_cam)
                     sv_det = self._byte_tracker.update_with_detections(sv_det)
 
                     # ── Conteo de zona (sv.PolygonZone) — Hito 2 ──

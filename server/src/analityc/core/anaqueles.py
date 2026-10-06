@@ -58,7 +58,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
-from . import anaqueles_grabador, anaqueles_productos
+from . import anaqueles_grabador, anaqueles_productos, ritmo_imagenes
 from .anaqueles_pose import PoseMunecas
 from .anaqueles_registro import GRID_DIM, RegistroAnaqueles
 from .estacionamiento_escena import DetectorEscena
@@ -128,6 +128,12 @@ _DEFECTOS: Dict[str, Any] = {
     # una transición fuera→dentro puede contar, y tras contar hay que salir
     # antes de poder contar otra. Parado quieto = cero agarres.
     'agarre_rearme_frames': 2,
+    # Las dos de arriba (frames_min y rearme) también en SEGUNDOS (5-oct-
+    # 2026, `ritmo_imagenes.py`): se exige lo MAYOR entre esas imágenes y
+    # estos segundos a los fps medidos. A ~5-8 fps da 2, como siempre; a
+    # 15 fps, 4. 0 = solo imágenes.
+    'agarre_min_s': 0.25,
+    'agarre_rearme_s': 0.25,
     # Segundos QUIETO antes de poder contar (v2: era «en compuerta», pero
     # quien camina a lo largo del estante pasa >1.2 s en compuerta y su
     # braceo hacía el patrón completo — un agarre real ocurre parado).
@@ -345,6 +351,9 @@ class MedidorAnaqueles:
         self._ref_ts: Dict[int, float] = {}
         self._aviso_escena: Optional[Dict[str, Any]] = None
         self._ultimo_frame_ts: Optional[float] = None
+        # Fps medidos de esta cámara, para pasar a segundos los ajustes del
+        # agarre contados en imágenes (`ritmo_imagenes.py`, 5-oct-2026).
+        self._ritmo = ritmo_imagenes.Ritmo()
         self._ultima_persona_ts = time.time()
         self._sin_personas_s: Optional[float] = None
 
@@ -448,6 +457,7 @@ class MedidorAnaqueles:
             # dt REAL entre frames (el pipeline va a 2-3 FPS efectivos);
             # acotado para que una pausa larga no pese como permanencia.
             dt = max(0.0, min(2.0, t - self._ultimo_frame_ts))
+        self._ritmo.anotar(t)
         self._ultimo_frame_ts = t
 
         # Cruce de medianoche con la conexión viva: el registro cierra el
@@ -1035,9 +1045,16 @@ class MedidorAnaqueles:
         persona.
         """
         maximo = int(self.cfg.get('pose_max_personas', 4))
-        frames_min = int(self.cfg.get('agarre_frames_min', 2))
+        # En imágenes, pero nunca menos que sus segundos a los fps medidos
+        # (5-oct-2026): a 15 fps, 2 imágenes eran 0,13 s de mano dentro.
+        fps = self._ritmo.fps
+        frames_min = ritmo_imagenes.imagenes_para(
+            float(self.cfg.get('agarre_min_s', 0.0)),
+            int(self.cfg.get('agarre_frames_min', 2)), fps)
         cooldown = float(self.cfg.get('agarre_cooldown_s', 10.0))
-        rearme = int(self.cfg.get('agarre_rearme_frames', 2))
+        rearme = ritmo_imagenes.imagenes_para(
+            float(self.cfg.get('agarre_rearme_s', 0.0)),
+            int(self.cfg.get('agarre_rearme_frames', 2)), fps)
         asentamiento = float(self.cfg.get('agarre_asentamiento_s', 1.2))
         amplitud_frac = float(self.cfg.get('agarre_amplitud_min', 0.30))
         desde_extremo = (self.cfg.get('agarre_amplitud_desde', 'ultimo')

@@ -52,6 +52,10 @@ class FotosMixin:
         if frame is None or getattr(frame, 'size', 0) == 0:
             return
         kmin = int(AnalyticsConfig.CAPTURE_MIN_SEEN_FRAMES)
+        # En tiempo real, no en imagenes (5-oct-2026, `TiendasProcess._imagenes`).
+        _imagenes = getattr(self, '_imagenes', None)
+        if _imagenes is not None:
+            kmin = _imagenes(kmin)
         ddt = float(AnalyticsConfig.CAPTURE_DEDUP_SECONDS)
         now = time.time()
         h, w = frame.shape[:2]

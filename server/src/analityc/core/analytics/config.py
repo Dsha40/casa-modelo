@@ -506,6 +506,13 @@ class AnalyticsConfig:
     # de emitir su ID. >1 evita falsos positivos efimeros (el track no cuenta
     # hasta confirmarse). 1 = sin confirmacion. 3 = robusto sin tardar mucho.
     BYTETRACK_MIN_CONSECUTIVE_FRAMES: int = 3
+    # Las dos de arriba también en SEGUNDOS (5-oct-2026, `ritmo_imagenes.py`):
+    # se exige lo MAYOR entre esas imágenes y estos segundos a los fps
+    # medidos de la camara. A ~5-8 fps da lo de siempre; a mas fps, la
+    # memoria de una persona tapada no baja de 9 s (la intencion de los 90
+    # frames, ver arriba) ni la confirmacion de 0,35 s. 0 = solo imagenes.
+    BYTETRACK_LOST_S: float = 9.0
+    BYTETRACK_MIN_CONSECUTIVE_S: float = 0.35
 
     # ── Zona de conteo (sv.PolygonZone) — Hito 2 ──
     # El "area" es el roi_polygon (mismo poligono configurable que ya existe).

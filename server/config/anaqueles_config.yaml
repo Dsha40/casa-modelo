@@ -45,6 +45,10 @@ dedup_espacial_ventana_s: 20
 # Frames consecutivos con la muñeca PROFUNDA (a 2-3 FPS efectivos, un
 # agarre entero dura 2-6 frames: no subir esto sin medir).
 agarre_frames_min: 2
+# Lo mismo en SEGUNDOS (5-oct-2026): se exige lo MAYOR entre los frames de
+# arriba y este tiempo a los fps medidos. A ~5-8 fps da 2 frames, como
+# siempre; a 15 fps, 4. 0 = solo frames. (ritmo_imagenes.py)
+agarre_min_s: 0.25
 # La misma persona en el mismo nivel no re-cuenta agarre hasta pasar esto.
 agarre_cooldown_s: 10
 # Penetración de la muñeca (v3: ESCALA con la persona): fracción del ancho
@@ -54,6 +58,8 @@ agarre_profundidad_frac: 0.08
 agarre_profundidad_px: 12
 # Frames seguidos fuera/superficial para RE-ARMAR el gesto.
 agarre_rearme_frames: 2
+# Lo mismo en SEGUNDOS, con la misma regla que agarre_min_s.
+agarre_rearme_s: 0.25
 # Segundos QUIETO antes de poder contar (v2: quien camina a lo largo del
 # estante pasaba >1.2 s «en compuerta» y su braceo hacía el patrón entero;
 # un agarre real ocurre PARADO).
