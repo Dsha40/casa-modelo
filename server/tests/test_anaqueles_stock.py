@@ -304,6 +304,28 @@ def test_el_agarre_del_medidor_arranca_la_vigilancia(tmp_path, monkeypatch):
     assert stock[-1]['referencias'] == 0
 
 
+def test_con_el_stock_apagado_ni_se_vigila_ni_se_arma(tmp_path, monkeypatch):
+    """`stock_activo: false` (6-oct, para la A/B de fps): el agarre cuenta
+    igual, pero el vigilante no se llama nunca."""
+    import test_anaqueles_productos as tp
+    medio = time.mktime((2026, 10, 5, 12, 0, 0, 0, 0, -1))
+    monkeypatch.setattr(time, 'time', lambda: medio)
+    m = tp._medidor(tmp_path, [tp.FUERA] * 4 + [[(250, 150, 0.9)]] * 4,
+                    [tp._prod(0, 'Colcafé', tp.DER)])
+    m.cfg['stock_activo'] = False
+    llamadas = []
+    monkeypatch.setattr(m._stock, 'tras_agarre',
+                        lambda *a, **k: llamadas.append('agarre'))
+    monkeypatch.setattr(m._stock, 'vigilar',
+                        lambda *a, **k: llamadas.append('vigilar'))
+    for i in range(8):
+        m.procesar(tp.FRAME, {1: {'class': -1, 'box': list(tp.BOX_EN_AREA),
+                                  'persistent_id': None}},
+                   ahora=medio + i * 0.5)
+    assert m.registro.area(0)['agarres'] == 1
+    assert llamadas == []
+
+
 # ── La alerta con foto: el ANTES y el DESPUÉS (5-oct) ───────────────────
 #: La persona que agarró: un recorte reconocible (rojo puro). Ya NO es la
 #: foto de la alerta (el usuario prefirió el antes y el después); sigue en

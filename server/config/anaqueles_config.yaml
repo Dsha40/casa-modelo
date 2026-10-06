@@ -121,6 +121,9 @@ alerta_surte_cooldown_s: 180
 # Segundos seguidos tocando un area para «esta surtiendo» (mas largo que la
 # visita de un cliente: rozar el area caminando no es surtir).
 surte_dwell_s: 3.0
+# Aviso de «posible agotado» tras un agarre (anaqueles_stock.py). false =
+# no se vigila nada (6-oct-2026, para la A/B de fps con y sin stock).
+stock_activo: true
 
 # ── Overrides por cámara (el camera_id literal del cliente) ─────────────
 # camaras:

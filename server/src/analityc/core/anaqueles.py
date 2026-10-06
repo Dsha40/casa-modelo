@@ -219,6 +219,9 @@ _DEFECTOS: Dict[str, Any] = {
     # `anaqueles_stock.py`). El UMBRAL NO ESTÁ CALIBRADO: no hay todavía ni
     # una balda vaciada de verdad, solo el vídeo. Cada medida sale en el log
     # (`STOCK [...] cambio=...`) para ajustarlo.
+    # Interruptor (6-oct-2026): para la A/B de fps con y sin stock. Apagado,
+    # no se vigila ni se arma nada tras un agarre.
+    'stock_activo': True,
     'stock_umbral': 0.45,
     # Mediciones seguidas por encima (alerta) o por debajo (sigue surtido).
     'stock_confirmaciones': 3,
@@ -1374,6 +1377,8 @@ class MedidorAnaqueles:
                        personal: List, t: float) -> None:
         """«Posible agotado» (5-oct-2026, `anaqueles_stock.py`). Tapan el
         producto tanto los clientes como el personal: los dos cuerpos."""
+        if not self.cfg.get('stock_activo', True):
+            return
         cuerpos =([b for _p, _tid, b in clientes]
                    + [b for _p, _tid, b, _f in personal])
         nombres = {i: self._nombre(i) for i in range(len(self._poligonos))}
@@ -1411,7 +1416,8 @@ class MedidorAnaqueles:
         self._evento('agarre', idx, pid, genero, rango, t, producto=producto)
         # TODOS los productos del área, no solo `producto`: la muñeca no es
         # la mano y el asignado cambia de una pasada a otra (hallazgo 25).
-        self._stock.tras_agarre(idx, t, persona=self._recorte_de(tid))
+        if self.cfg.get('stock_activo', True):
+            self._stock.tras_agarre(idx, t, persona=self._recorte_de(tid))
         logger.info("anaqueles[%s] AGARRE #%d en %s%s (%s)",
                     self.camera_id, total, self._nombre(idx),
                     f' → {producto}' if producto else '', _corto(pid))
