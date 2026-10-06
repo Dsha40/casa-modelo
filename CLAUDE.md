@@ -1,9 +1,10 @@
 # CLAUDE.md — ELDE Tiendas (contexto de trabajo)
 
 Traspaso de las sesiones del 16-18, 21-22, 23, 24, 25, 28, 29 y **30 de
-septiembre de 2026** (actualizado el 1-oct; **secciones 12 y 13 añadidas el
-2 y el 5-oct por la sesión del CLIENTE**). **Este archivo SÍ se commitea**: vive en la rama para
-que la siguiente sesión lo lea sin que el usuario tenga que pegarlo.
+septiembre de 2026** (actualizado el 1-oct; **secciones 12, 13 y 14 añadidas
+el 2, el 5 y el 6-oct por la sesión del CLIENTE**). **Este archivo SÍ se
+commitea**: vive en la rama para que la siguiente sesión lo lea sin que el
+usuario tenga que pegarlo.
 
 **Rama actual: `feature/anaquel`** (publicada). Cuelga de `fix/gender` →
 `claude/pensive-galileo-aymjr3` → `fix/eliminar_vigilantes_amazonas`, **no de
@@ -12,13 +13,14 @@ que la siguiente sesión lo lea sin que el usuario tenga que pegarlo.
 **Hay DOS sesiones de Claude en paralelo:** una en el Linux del usuario, junto
 al servidor, y otra en el **cliente** de Windows. No se ven entre ellas: solo
 comparten lo que quede commiteado aquí. La del cliente tiene su encargo en la
-**sección 9** (reescrita el 29-sep). La sesión del cliente **sigue sin subir
-nada al remoto**: el 5-oct tiene commits locales sin push (13.1).
+**sección 9** (reescrita el 29-sep). El 6-oct la sesión del cliente **subió
+sus commits** (los del 5-oct, 13.1, y los del 6-oct, 14.1) a
+`fork/feature/anaquel`.
 
 > **¿Eres la próxima sesión del CLIENTE (Windows)? Empieza por la sección
-> 13** (2 y 5 de oct): el estado del código, lo medido y lo pendiente. La 12
-> (1-2 oct) sigue valiendo como contexto, pero su lista 12.6 ya está casi
-> toda hecha o recogida en 13.10.
+> 14** (6-oct): el estado del código, lo medido y lo pendiente. La 13 (2 y
+> 5-oct) y la 12 (1-2 oct) siguen valiendo como contexto; sus pendientes
+> están recogidos en 14.11.
 
 **Donde este archivo dé una cifra, mira su fecha.** Las cifras de horas o días
 de producción mandan sobre las de minutos de vídeo.
@@ -215,9 +217,11 @@ cd server && ELDE_TIENDA_DB=<scratchpad>/tienda_pruebas.db PYTHONPATH=<scratchpa
 ```
 
 **Línea base (30-sep): `852 passed, 16 skipped, 2 xfailed`.** Si ves un
-`failed`, es tuyo. **En el PC de Windows** (5-oct): `876 passed, 15
-skipped, 1 xfailed` con el código de la sección 13; la diferencia de
-skipped/xfailed con Linux ya estaba antes de esos cambios (sección 13.2). Las de `packages/elde_core` necesitan PySide6: aquí no
+`failed`, es tuyo. **En el PC de Windows** (6-oct): `941 passed, 15
+skipped, 1 xfailed` con el código de la sección 14 (el 5-oct, 876); la
+diferencia de skipped/xfailed con Linux ya estaba antes de esos cambios
+(sección 13.2). Cliente en Windows (6-oct): `clients/tienda/test` 30
+passed; `packages/elde_core` 377 passed y los 72 fallos de siempre (13.2). Las de `packages/elde_core` necesitan PySide6: aquí no
 corren; las que nombran a otros clientes (`clients/amazonas`, `detecciones`,
 `perimetrales`) fallan siempre porque esas carpetas no existen en este corte.
 
@@ -446,8 +450,21 @@ clasificaciones,capturas}`, `/api/anaqueles/<cámara>/resumen`,
 | `b303013` | ídem | **telemetría de fps por cámara** en el log (recibidos, procesados, tiempo de proceso, KB/s) |
 | `c690a86` | ídem | **agarres en baldas altas**: `pose_cercania` + `extremo` (encendidas en el YAML), diagnóstico (`ELDE_ANAQUELES_DIAG`) y grabador (`ELDE_ANAQUELES_GRABAR`); dos opciones probadas y quitadas |
 | `8994ba8` | ídem | **`descartados` de la telemetría = reemplazos reales de la cola** (antes, una resta que contaba el frame en vuelo) |
-| `c2f96e5` | ídem (5-oct, **sin push**) | **imagen del detector preparada en la GPU** (`imagen_a_gpu.py`): 5,22 → 7,71 fps en el PC de la tienda (sección 13.5) |
-| «Cronometrar el proceso con el reloj fino…» (el commit siguiente a `c2f96e5`) | ídem (5-oct, **sin push**) | **reloj fino** (`perf_counter`) para el «proceso» de la telemetría: resuelve el hallazgo 34 |
+| `c2f96e5` | ídem (5-oct) | **imagen del detector preparada en la GPU** (`imagen_a_gpu.py`): 5,22 → 7,71 fps en el PC de la tienda (sección 13.5) |
+| `97b4489` | ídem (5-oct) | **reloj fino** (`perf_counter`) para el «proceso» de la telemetría: resuelve el hallazgo 34. Lleva también el CLAUDE.md con la sección 13 |
+| `a27ce80` | ídem (5-oct) | **mapa de calor bajo pedido y en JPEG**: del 9,6 % al 0,9 % del hilo de imágenes (13.6) |
+| `7cec236` | ídem (5-oct; cambio del 2-oct) | **filtro del fondo** por alto en px, solo en el perfil del vídeo (13.3) |
+| `b2602ac` | ídem (5-oct; cambio del 1-oct) | **el escáner de ventanas ignora las del propio cliente** (12.4) |
+| `face1ea` | ídem (5-oct; cambio del 1-oct) | **telemetría del ciclo del cliente** (12.4, tarea 1 de la sección 9) |
+| `25c9c13` | ídem (5-oct; cambio del 2-oct) | **regla en píxeles** sobre el recuadro (12.4) |
+| `3b9269f` | ídem (6-oct; cambio del 5-oct) | **ajustes contados en imágenes, ahora en segundos** (`ritmo_imagenes.py`): agarre, ByteTrack, ROI, fichas, género y track único (14.8) |
+| `9b93e45` | ídem (6-oct; cambio del 5-oct) | **tarea 2**: enviar la captura guardada antes de pintar (14.2) |
+| `d77ace2` | ídem (6-oct; cambio del 5-oct) | **aviso de «posible agotado»** tras un agarre (`anaqueles_stock.py`, 14.7) |
+| `6d4f132` | ídem (6-oct) | interruptor **`stock_activo`** (14.7) |
+| `644fdec` | ídem (6-oct) | **pose en la GPU y en lote** (`pose_gpu.py`, 14.5) |
+| `004ef1b` | ídem (6-oct) | **agarres falsos en el área de abajo**: misma mano y bajada (14.6) |
+| `d34a1d7` | ídem (6-oct) | **cronómetro por etapas** imagen a imagen (`tiempos_etapas.py`, 14.4) |
+| `9933637` | ídem (6-oct) | **modo F**: cada imagen sale al socket en el acto, 9,85 → 14,29 fps (14.3) |
 
 ---
 
@@ -622,7 +639,7 @@ sesión del Linux**):
   con QPainter **18 ms**, esperar la siguiente captura **10 ms** (no 25),
   captura → cliente 3 ms, enviar 0,6 ms. **El cliente suma ~30 ms.**
 - Su reloj del «proceso» iba a saltos de 15,6 ms en Windows (hallazgo 34,
-  resuelto en el commit del reloj fino).
+  resuelto en `97b4489`).
 
 **Qué frena el túnel (deducido por la sesión del Linux, 1-oct):** la sesión
 del cliente dedujo ~85-105 ms **fijos por viaje**. **No encaja** con la
@@ -689,16 +706,20 @@ Antes de citar uno, **comprueba que el código sigue igual**.
 | 4 | Panel de Anaqueles: «Persona (Desconocido)» (`anaqueles_panel.py:55`, `:363`) | vivo; una línea (cliente) |
 | 22 | `setup_modelos.py` y `body_sin_modelo` dicen que la rama corporal está apagada, y mienten. **No generes el modelo PAR** | vivo |
 | 24 | **Gesto reiniciado si la cara se reconoce a mitad** (sección 3, Anaqueles) | vivo; medir en real |
-| 25 | **Muñeca ≠ mano**: producto inestable; estimar la mano con el codo | vivo |
+| 25 | **Muñeca ≠ mano**: producto inestable; estimar la mano con el codo. Ejemplo medido el 6-oct en la grabación del vídeo: la muñeca de la clienta cae en x ≈ 229-230 px, justo en la frontera entre los recuadros dibujados de «coffemate» (borde derecho x 224-232) y «Nescafe» (borde izquierdo x 228-235): por eso el mismo agarre sale «coffemate» o «Nescafe» según la pasada | vivo |
 | 26 | **El panel del cliente no muestra productos**: el bloque en vivo `metadata['anaqueles']` no los lleva (`registro.resumen()` sin productos) | pendiente (servidor + cliente) |
 | 27 | Contador «FPS: N» del recuadro cuenta lecturas, no capturas (sección 3) | vivo (cliente) |
 | 28 | «Archivo de configuración creado» al CARGARLA (`settings_model.py:114`) | cosmético (cliente) |
 | 29 | Dashboard inalcanzable desde el navegador de Windows (sección 1) | del montaje |
-| 30 | **La ruta de captura de ventana no tiene red de seguridad**: si una respuesta se pierde, el recuadro no vuelve a enviar hasta reconectar (`render_box_captura.py:574`; la ruta DVR sí libera a los 10 s, `render_box.py:583-589`). Hoy casi no pasa (un frame en vuelo); con dos en vuelo sí | vivo (cliente) |
+| 30 | **La ruta de captura de ventana no tiene red de seguridad**: si una respuesta se pierde, el recuadro no vuelve a enviar hasta reconectar (`render_box_captura.py:574`; la ruta DVR sí libera a los 10 s, `render_box.py:583-589`). Hoy casi no pasa (un frame en vuelo); con dos en vuelo sí. **Otra forma de perderla (leído el 6-oct):** si el servidor rechaza un mensaje mal formado, contesta con `_send_error` (`app.py:1545-1547`), que NO lleva `event: inference`, y el cliente solo reparte a los recuadros los mensajes con ese `event` (`socket_client.py:316-317`, `:330-331`): el recuadro que lo envió espera para siempre. Ese error NO desbloquea a los demás recuadros (eso se dijo mal el 6-oct y se corrigió). 0 casos en las pasadas del 6-oct | vivo (cliente) |
 | 14 | `_best_in_gallery` es O(N) en Python; con el TTL ya no urge | vivo |
 | 31 | **El mapa de calor, las estelas y la elipse del recuadro no hacen nada sin Supervision**, y el cliente de la tienda NO lo tiene (`ModuleNotFoundError` en su `venv`, comprobado por el usuario el 30-sep). Las opciones aparecen y no avisan (`render_box.py:296-305`, `:1356-1363`); se dibuja con QPainter. Supervision queda fuera a propósito (`requirements-cliente.txt:25-28`). Los comentarios de `render_box.py:316-318` y `:1370` dicen que «el servidor pinta», pero eso solo pasa en el modo clásico | pendiente de revisar (cliente); detalle en `informes/Pendientes_Rendimiento.md`, n.º 17 (local, fuera de git) |
 | 32 | **`print()` de depuración en CADA frame** (`tiendas.py:2192-2193`, «📍 ROI actualizado», y `:2371-2372`): llenan la consola (~2 MB/h, sin rotación). Hipótesis SIN comprobar: con el disco lleno, un `print` que falla rompería cada frame (eso explicaría la imagen pegada del 30-sep); al probarlo ya había espacio | vivo (servidor) |
 | 33 | **Cada cámara carga SU PROPIA copia de ViTPose** (comprobado el 1-oct leyendo el código): cada `PoseMunecas` pide motor (`anaqueles_pose.py:123`) y `crear_motor_pose` crea uno nuevo cada vez (`pose_motor.py:174-199`), que carga su modelo. Con N cámaras, N copias en la GPU y un parón de carga por cámara (18 s en Windows; 4-53 s en Linux). El detector sí se comparte (`deteccion_compartida.py`) | vivo (servidor); arreglo: compartir el motor como el detector |
+| 35 | **Una persona entra y sale del ROI 8 veces en 9 min** en el mismo tramo del vídeo, a 9,85 y a 14,29 fps (6-oct, 14.8): no depende de los fps. Parece alguien parado en el borde del ROI [sin comprobar] | vivo (servidor) |
+| 36 | **El detector tarda ~6 ms más en las imágenes en que se calcula la pose** (30,8 → 36,8 ms de mediana, 14.4), aunque va antes que la pose y no depende de ella. Sin explicar | vivo (servidor) |
+| 37 | **La espera de 10 s entre agarres** (`agarre_cooldown_s`) junta las veces que alguien mete la mano: la clienta del vídeo metió la mano 8 veces en la balda alta (contadas por el usuario el 6-oct) y salen 2-3 agarres. **Decisión del usuario pendiente:** contar cada vez que mete la mano o una vez por visita con intención de coger | pendiente (decisión) |
+| 38 | **El Anaquel 1 da 2 o 3 agarres** según la pasada en el tramo de la clienta (y según se mueva el área 8 px, 14.6): sensible a dónde está dibujado | vivo; sin investigar |
 | 2, 5, 6, 7, 3, 9, 10, 12, 17, 23 | Jarvis, errores que el cliente nunca ve, DVR por IP, `main.spec`, aforo, Stand, polling `/vlm/model`, `site_id` | menores o aplazados |
 
 ---
@@ -717,10 +738,12 @@ Antes de citar uno, **comprueba que el código sigue igual**.
    de 1; poca muestra todavía. **El usuario no siempre tiene grabación en
    iVMS**: para verificar cada agarre hará falta `ELDE_ANAQUELES_GRABAR`
    (fotos de clientes, ~2,4 GB por 40 min; pedir permiso y mirar el disco).
-2. **Rendimiento del ciclo:** la telemetría del cliente ya existe (12.4, sin
-   commitear) y el reparto está medido en el PC de Windows (12.2 y 13.4-13.8).
-   Hecho el 5-oct: imagen del detector en la GPU (`c2f96e5`), reloj fino
-   (el commit del reloj fino) y mapa de calor bajo pedido (13.6). Lo que queda, en 13.10.
+2. **Rendimiento del ciclo:** la telemetría del cliente existe (12.4) y el
+   reparto está medido imagen a imagen en el PC de Windows (14.4). Hecho el
+   5-oct: imagen del detector en la GPU (`c2f96e5`), reloj fino (`97b4489`)
+   y mapa de calor bajo pedido (13.6). Hecho el 6-oct: tarea 2, pose en la
+   GPU y en lote, y modo F (de 7,7 a 14,3 fps en el vídeo, 14.2). Lo que
+   queda, en 14.11.
    Lista vieja, de fácil a difícil, en `informes/Pendientes_Rendimiento.md`
    (local, en Linux).
 3. **Estimar la mano con codo → muñeca** para el reparto por producto; medirlo
@@ -777,7 +800,8 @@ después. **Avísale de que el fichero solo se completa al cerrar el cliente.**
 
 ### Tarea 1 — Medir el ciclo en el cliente (lo primero)
 
-**Estado (1-oct): hecha por la sesión del cliente, sin commitear todavía.**
+**Estado: hecha por la sesión del cliente el 1-oct, commiteada el 5-oct
+(`face1ea`, sin push).**
 Resultados en 5.9. Datos en `%LOCALAPPDATA%\tienda_view\telemetria_ciclo.jsonl`
 del PC del cliente.
 
@@ -805,6 +829,11 @@ del PC del cliente.
 
 ### Tarea 2 — Mejora pequeña: mandar al instante la última captura
 
+**Estado: hecha el 5-oct (14.1).** Medido en el vídeo: 7,71 → 9,86 fps. Su
+mejora la remató el **modo F** del 6-oct (14.3): sin él, la imagen enviada
+esperaba en el búfer de Qt a que terminara el dibujo. Lo de abajo es el
+encargo original.
+
 Hoy, al llegar la respuesta, se dibuja y después se pone
 `can_send_next_frame = True` (`render_box.py:1845`), y se espera la
 **siguiente** captura; las que llegaron mientras tanto ya se tiraron
@@ -827,6 +856,12 @@ esperar la captura y ~18 ms de dibujo, si se envía antes de dibujar. Medir
 con la tarea 1 y con las líneas `FPS` del servidor.
 
 ### Tarea 3 — Mejora grande: dos fotogramas en vuelo
+
+**Estado (6-oct): sin hacer, y ahora probablemente rinde poco** (deducido,
+sin medir): con la tarea 2 y el modo F el cliente ya pinta mientras el
+servidor trabaja, y el ciclo (70 ms de media) es casi el tiempo del
+servidor (65 ms; 14.2). Una segunda imagen en vuelo esperaría en la cola
+del servidor.
 
 `can_send_next_frame` pasa de booleano a **contador de frames en vuelo (máx.
 2)**. **Esperado (estimado): ~8-12 fps.** Tres cuidados:
@@ -1055,7 +1090,7 @@ informes citados viven en `informes\` **de Windows** (fuera de git).
   3090 Ti, el detector completo tarda 32-36 ms.
 - **La CPU ocupada por otros programas** (Media Player) añade 15-30 ms al
   proceso: 94 → 110-125 ms, con ±15 ms de margen por el reloj (hallazgo 34,
-  resuelto el 5-oct en el commit del reloj fino).
+  resuelto el 5-oct en `97b4489`).
 - **Lectura:** en este PC el cuello es el procesador compartido, más una GPU
   más lenta. Con el túnel de Linux era la subida de cada imagen (5.9). Los
   fps salen parecidos (~5-7).
@@ -1087,7 +1122,7 @@ Informes `informe_2026-10-01_tarde.md` e `informe_2026-10-02.md` (Windows).
   rostro», con la imagen a oscuras; y el anaqueles suspende el conteo cada
   30 s (1.210 veces).
 
-### 12.4 Cambios en el código (SIN COMMITEAR al 5-oct), todos con pruebas
+### 12.4 Cambios en el código (commiteados el 5-oct, sin push: 13.1), todos con pruebas
 
 1. **Telemetría del ciclo** (tarea 1 de la sección 9):
    `packages/elde_core/elde_core/ui/telemetria_ciclo.py` (nuevo), enganches
@@ -1154,9 +1189,8 @@ suite entera del servidor en Windows.**
 - **Este archivo frente al remoto:** comprobado el 5-oct. El commit de la
   sesión Linux del 1-oct no llegó nunca (13.0).
 
-**En curso:**
-
-- **Los commits:** uno por funcionalidad y con permiso (13.1).
+- **Los commits:** hechos el 5-oct, uno por funcionalidad (13.1). Falta el
+  push, cuando el usuario lo diga.
 
 **Pendiente** (también en 13.10):
 
@@ -1225,19 +1259,30 @@ El servidor de Windows escribe su log en **hora local** (Venezuela).
 6. **Antes de dejar el sistema solo, comprueba que llegan imágenes** (líneas
    `FPS [` en el log del último minuto), no solo que `/health` responde (13.9).
 
-### 13.1 Estado del código (5-oct, ~12:00)
+### 13.1 Estado del código (5-oct, ~13:00)
 
-- **Commits locales, SIN push:** `c2f96e5` (imagen del detector en la GPU) y
-  el del reloj fino, que lleva también este CLAUDE.md.
-- **Sin commitear, con pruebas:**
-  - mapa de calor bajo pedido (13.6);
-  - filtro del fondo;
-  - telemetría del ciclo;
-  - escáner de ventanas, con el arreglo de su prueba (13.2);
-  - regla en píxeles.
+**Subidos el 6-oct** (14.1). El 5-oct quedaron commiteados en local: 7
+commits por delante de `fork/feature/anaquel`, que seguía en `8100b95`. Uno
+por funcionalidad, con la fecha REAL del cambio en el asunto. Cada uno se
+comprobó solo, con la suite sobre una copia limpia de ese commit.
 
-  `config.py` mezcla el filtro y el mapa de calor, y `render_box.py` mezcla
-  la telemetría y la regla: hay que subir a cada commit solo su parte.
+| Commit | Qué |
+|---|---|
+| `c2f96e5` | imagen del detector preparada en la GPU (13.5) |
+| `97b4489` | reloj fino + este CLAUDE.md con la sección 13 |
+| `a27ce80` | mapa de calor bajo pedido y en JPEG (13.6) |
+| `7cec236` | filtro del fondo (13.3) |
+| `b2602ac` | escáner de ventanas, con el arreglo de su prueba (13.2) |
+| `face1ea` | telemetría del ciclo del cliente |
+| `25c9c13` | regla en píxeles |
+
+- `config.py` (filtro + mapa) y `render_box.py` (telemetría + regla) se
+  repartieron: cada commit lleva solo su parte.
+- **Suite en copias limpias:** servidor 876 passed; cliente, los mismos 72
+  fallos de siempre y ninguno nuevo. Dos pruebas de la baliza se saltan si
+  el servidor está encendido (ocupa el puerto 9010).
+- **Las correcciones de este CLAUDE.md tras los commits están sin commitear**
+  (el usuario lo pidió así).
 - **El servidor de Windows corre con todo eso** (arrancado el 5-oct a las
   11:18:58, modo G y mapa bajo pedido).
 
@@ -1332,7 +1377,7 @@ y con filtro.
   cliente. Solo vuelve atrás con el interruptor, sin CUDA o si falla.
 - La C reproduce las ~5,3 fps del 2-oct: la mejora es del cambio.
 
-### 13.6 Mapa de calor bajo pedido y en JPEG (sin commitear)
+### 13.6 Mapa de calor bajo pedido y en JPEG (`a27ce80`)
 
 - **Antes:** cada 5 s, dentro del procesado de una imagen, se pintaba el mapa
   a 1456×868 (~174 ms) y se guardaba en PNG (~258 ms). Eso era el ~9,6 % del
@@ -1420,19 +1465,14 @@ probarlo con pruebas de puntos, con el tramo de la clienta y con una A/B.
 
 ### 13.10 Pendientes, por orden
 
-1. **Commits:**
-   - el mapa de calor bajo pedido;
-   - el filtro del fondo;
-   - la telemetría del ciclo;
-   - el escáner de ventanas;
-   - la regla;
-   - este CLAUDE.md.
+**Lista del 5-oct; la vigente es la 14.11.**
 
-   **Push solo cuando el usuario lo diga.**
+1. ~~**Push** de los 7 commits (13.1) y de las correcciones de este
+   CLAUDE.md~~: hecho el 6-oct (14.1).
 2. **Mirar las fotos de las 14 fichas pequeñas** (13.3).
 3. **iVMS:** el modo de copia y el stream directo de la cámara 3 (13.7), en
    cuanto tenga señal.
-4. **Pose en la GPU** (13.8), con su A/B.
+4. ~~**Pose en la GPU** (13.8), con su A/B~~: hecho el 6-oct (14.5).
 5. **Captura bajo pedido** (13.7, idea 1).
 6. **Caras (9,6 %) y abrir el JPEG (9,3 %):** medir dentro qué parte es CPU.
 7. **Compartir ViTPose entre cámaras** (hallazgo 33). Importa con varias
@@ -1471,3 +1511,314 @@ probarlo con pruebas de puntos, con el tramo de la clienta y con una A/B.
 6. **Meter medidas (py-spy, bancos) en medio de una pasada:** ensucian sus
    fps.
 7. **Actualizar el informe varias veces sin que el usuario lo pidiera.**
+
+---
+
+## 14. Sesión del CLIENTE en Windows (6 oct)
+
+Escrito el 6-oct por la sesión del cliente, para la siguiente. Medido en el
+PC `DESKTOP-9LHHJI2` con el **vídeo de la cámara 3 en Media Player** (no con
+iVMS en vivo: no hubo señal), salvo lo marcado como **deducido** o **sin
+comprobar**. Horas del log del servidor de Windows: locales (Venezuela).
+
+### 14.0 Para empezar
+
+1. Lo de 13.0 sigue valiendo: informes solo cuando el usuario los pida, el
+   remoto es `fork`, pytest aparte con `--target`.
+2. **Interruptores nuevos:**
+
+   | Interruptor | Dónde | Qué hace | Por defecto |
+   |---|---|---|---|
+   | `ELDE_MODO_F=0` | una línea en `clients/tienda/.env` (vale con `INICIAR_TIENDA.bat`) o variable en la consola del cliente | apaga el modo F (14.3) | encendido |
+   | `ELDE_POSE_PREPARAR_EN_GPU=0` | variable del servidor | pose como antes: persona a persona y preparada en la CPU (14.5) | encendido |
+   | `stock_activo: false` | `server/config/anaqueles_config.yaml` | apaga el aviso de stock (14.7) | encendido |
+   | `ELDE_TIEMPOS_ETAPAS=<ruta absoluta .jsonl>` | variable del servidor | cronómetro por etapas (14.4) | apagado: es diagnóstico |
+
+3. **Si el log del servidor dice `tiempos_etapas: CRONOMETRANDO`**, el
+   cronómetro está encendido (una línea por imagen en su `.jsonl`).
+   Reinicia el servidor sin la variable cuando acabes.
+4. **Pasadas A/B del vídeo:** pose cargada antes (hacia las 11:20:30 de
+   cámara; el log dice «ViTPose cargado») y luego 10 min desde las
+   11:17:00. **Alinea las pasadas por los agarres y visitas del log**
+   (desfase fijo entre pasadas), no por la hora que diga el usuario: a
+   veces empieza antes o se pasa de los 10 min.
+5. **Una grabación de diagnóstico se reproduce igual que en vivo:** la del
+   6-oct (`ELDE_ANAQUELES_GRABAR`, 11:06) dio fuera de línea los mismos
+   agarres en los mismos segundos (11:07:04, 11:07:18, 11:07:24). Sirve para
+   probar reglas del agarre sin pedir pasadas al usuario. Son fotos de
+   clientes: fuera del repo, y preguntar antes de grabar y para borrar.
+6. **Herramientas de esta sesión** en
+   `informes\herramientas_cliente\sesion_2026-10-06\`, explicadas en su
+   `LEEME_herramientas_2026-10-06.md`: reproductor de la grabación
+   (`reproducir.py`, `robustez.py`), análisis del cronómetro y del ciclo
+   (`analizar_tiempos.py`, `ciclo_completo.py`, `comparar_flush.py`…) y
+   validación de la pose. Llevan horas del 6-oct escritas: cámbialas.
+
+### 14.1 Commits del 6-oct
+
+Subidos a `fork/feature/anaquel` junto con los 7 del 5-oct (13.1). Uno por
+funcionalidad, con la fecha real del cambio en el asunto; cada uno se
+comprobó solo, con la suite sobre una copia limpia de ese commit.
+`anaqueles.py` (segundos, stock, interruptor del stock, pose en lote y
+agarres falsos), el YAML y `test_anaqueles_stock.py` se repartieron por
+partes: cada commit lleva solo la suya.
+
+| Commit | Qué |
+|---|---|
+| `3b9269f` | ajustes en segundos (14.8), cambio del 5-oct |
+| `9b93e45` | tarea 2 (sección 9), cambio del 5-oct |
+| `d77ace2` | aviso de «posible agotado» (14.7), cambio del 5-oct |
+| `6d4f132` | interruptor `stock_activo` (14.7) |
+| `644fdec` | pose en la GPU y en lote (14.5) |
+| `004ef1b` | agarres falsos en el área de abajo (14.6) |
+| `d34a1d7` | cronómetro por etapas (14.4) |
+| `9933637` | modo F (14.3) |
+| (el último) | este CLAUDE.md |
+
+### 14.2 Rendimiento: de 7,7 a 14,3 imágenes por segundo
+
+Imágenes respondidas por segundo en el cliente, vídeo, una cámara:
+
+| Pasada | Cuándo | Qué llevaba | img/s |
+|---|---|---|---:|
+| G | 5-oct 09:54 | imagen del detector en la GPU (13.5) | 7,71 |
+| T2 | 5-oct 14:38 | + tarea 2 | 9,86 |
+| S1 | 6-oct 09:13 | + segundos + stock | 10,31 |
+| B | 6-oct 10:04 | + pose en la GPU y en lote | 10,14 |
+| antes del F | 6-oct 12:04-12:13 | + agarres falsos + cronómetro | 9,85 |
+| **F** | 6-oct 12:45-12:54 | + **modo F** | **14,29** |
+
+- G, T2, S1 y B: mismo tramo de 554 s. «Antes del F» y F: mismo tramo de
+  535 s (algo distinto). No compares filas de tramos distintos.
+- **En el agarre** (los mismos 30 s, con ~2 personas): 7,0 img/s sin el
+  modo F y **11,6** con él.
+- **Ciclo con el modo F** (media, ms): 70 de envío a envío; el servidor 65;
+  la ida ≈ 0; la vuelta 3,8; el dibujo, 18,8, ya va en paralelo con el
+  servidor. **El cuello ahora es el servidor** (14.4).
+
+### 14.3 Modo F: cada imagen sale al socket en el acto
+
+Lo explica, con cómo llevarlo a otro proyecto, la cabecera de
+`packages/elde_core/elde_core/transport/socket_client.py`. Resumen:
+
+- **El problema:** `QWebSocket.sendBinaryMessage` deja la imagen en el búfer
+  de Qt, que sale cuando el hilo vuelve a su bucle. Con la tarea 2 el
+  recuadro envía y JUSTO DESPUÉS pinta (~18 ms): la imagen esperaba a que
+  acabara el dibujo. Medido con el cronómetro del servidor y la telemetría
+  del cliente (mismo PC, mismo reloj): 27 ms de mediana de «envío» a «el
+  servidor empieza»; la única imagen enviada sin pintar detrás, 0,8 ms.
+- **El arreglo:** `self.client.flush()` tras cada envío.
+- **Resultado, mismo tramo de 535 s** (1,42 frente a 1,43 personas de
+  media; el servidor, 65,9 frente a 65,2 ms): ida 31,4 → ≈0 ms; ciclo
+  101,5 → 70,0 ms; 9,85 → 14,29 img/s. Enviar cuesta 0,40 → 0,70 ms
+  (mediana): `flush()` no espera a la red. 0 errores en 7.643 imágenes y 0
+  avisos en el log del servidor.
+- **Interruptor:** `ELDE_MODO_F=0` (14.0). El log del cliente
+  (`clients/tienda/logs/tienda.log`) dice al arrancar si está encendido.
+- **Sin probar:** iVMS en vivo, varias cámaras a la vez y el servidor de
+  Linux por el túnel (ahí la subida es más lenta y debería ayudar más:
+  deducido).
+- `send_frame` (envío por texto/JSON) NO lleva el modo F: nadie lo usa en
+  este repo; un cliente del monorepo que lo use necesitaría la misma línea.
+
+### 14.4 Cronómetro por etapas (`tiempos_etapas.py`)
+
+- Con `ELDE_TIEMPOS_ETAPAS=<ruta .jsonl>` el servidor envuelve al arrancar
+  (`lifespan` de `app.py`) 21 funciones y escribe una línea por imagen: los
+  ms PROPIOS de cada etapa (la de dentro se resta a la de fuera), las
+  personas, a cuántas se calculó la pose y el total. Sin la variable no toca
+  nada.
+- **Fiable:** en cada imagen, la suma de etapas = el total (0,03 ms como
+  mucho), y el total coincide con la telemetría `FPS [` en cada tramo de
+  30 s (±1,6 ms).
+- **Medias por imagen** (pasada de las 12:02, 6.293 imágenes; con varias
+  personas, a la pose se le calcula a la que está junto al estante):
+
+  | Personas | Pose a | Imágenes | Total | Detector | JPEG | Escena | Pose | Caras (YuNet) | Edad/género | Cuerpo |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | 0 | — | 1.280 | 49,5 | 31,0 | 9,5 | 4,6 | 0 | 0 | 0 | 0 |
+  | 1 | — | 2.110 | 59,0 | 31,7 | 9,8 | 4,5 | 0 | 2,0 | 2,5 | 0,8 |
+  | 1 | 1 | 490 | 82,7 | 37,5 | 9,9 | 4,4 | 20,2 | 2,2 | 0,2 | 1,2 |
+  | 2 | 1 | 640 | 93,7 | 37,5 | 9,9 | 4,5 | 19,9 | 6,2 | 5,4 | 2,1 |
+  | 3 | 1 | 164 | 110,8 | 39,6 | 10,3 | 4,8 | 20,6 | 12,6 | 9,4 | 3,5 |
+
+- **Lo fijo de cada imagen:** detector ~31 ms, abrir el JPEG ~9,5, comprobar
+  la escena ~4,5. **Con alguien junto al estante:** la pose ~20 ms, y el
+  detector ~6 ms más (hallazgo 36). **Las etapas intermitentes** (caras,
+  edad/género) suben con la gente y dan los picos: de las imágenes de
+  100-200 ms (7,8 %), la etapa más larga es edad/género en 246, el detector
+  en 116, las caras en 112 y la pose en 13.
+- **Da medias Y medianas:** en la mediana las etapas intermitentes salen 0
+  (el usuario pidió las medias, y con razón).
+
+### 14.5 Pose en la GPU y en lote (`pose_gpu.py`)
+
+- **Qué:** los recortes se preparan en la GPU con la MISMA fórmula que el
+  preparador de Hugging Face (recuadro ×1,25 a la proporción 192/256,
+  bilineal, 0 fuera de la imagen, redondeo a `uint8`, normalización), y
+  todas las personas de una imagen van en una sola llamada al modelo
+  (`keypoints_lote` en `pose_motor.py`, `munecas_lote` en
+  `anaqueles_pose.py`). El posproceso sigue siendo el de Hugging Face.
+- **Dos fallos encontrados al validar:** en el borde, `grid_sample` mezclaba
+  con negro donde scipy pone negro (35-60 niveles de más en una franja); y
+  una fórmula «equivalente» cambiaba la última cifra y movía una fila de
+  borde. Se calculan las coordenadas igual que scipy (la matriz float32
+  invertida en float64).
+- **Validado con 298 fotos de fichas** (solo leídas en memoria, con permiso
+  del usuario): entrada al modelo igual (≤ 1 nivel de gris); muñecas a
+  ≤ 0,23 px. En lote (4 personas por imagen, 400 fotos): las mismas 592
+  muñecas, a ≤ 0,11 px.
+- **Banco:** 1 persona 24,9 → 20,1 ms; 2: 50,7 → 23,3; 3: 74,5 → 26,8; 4:
+  100,6 → 30,4.
+- **En vivo (pasada B):** los mismos 3 agarres y la misma visita (el tercer
+  agarre, 4 s antes que en la S1; el producto asignado cambió, como de
+  costumbre: hallazgo 25), pero en el agarre el servidor solo baja de 82-88
+  a 77-80 ms: casi siempre se
+  calcula la pose a UNA persona. Se estimó «7 → 9-10 fps en el agarre» sin
+  medir dentro del servidor, y no se cumplió (14.12).
+- Sin CUDA, con el interruptor o si falla, vuelve a persona a persona en la
+  CPU. Cada cámara sigue cargando su propio ViTPose (hallazgo 33).
+
+### 14.6 Agarres falsos en el área de abajo
+
+- **Síntoma:** en el tramo de la clienta salían agarres en el Anaquel 2
+  (abajo). El usuario revisó el vídeo: mete la mano 8 veces, todas en la
+  balda alta.
+- **Diagnóstico** (`ELDE_ANAQUELES_DIAG` + grabación del 6-oct a las 11:06,
+  reproducida fuera de línea), dos causas:
+  1. **Misma mano:** la pose vio una mano y le puso las dos etiquetas. La
+     «izquierda», que colgaba al costado (y ≈ 800), apareció encima de la
+     derecha (a 1-3 px, confianza 0,30-0,63): 443 px de «recorrido» hacia
+     el Anaquel 2.
+  2. **Bajada:** la derecha volvía de DENTRO del Anaquel 1 y se quedaba a la
+     cintura, que con el ángulo de la cámara cae dentro del Anaquel 2. Para
+     él, la mano venía «de fuera».
+- **Reglas** (`anaqueles.py`): dos muñecas a menos de max(8 px, 5 % del
+  ancho de la persona) son una sola mano y se queda la de más confianza
+  (`_una_mano_si_coinciden`). Si el origen del gesto estaba DENTRO de un
+  área que queda encima, se descarta (`agarre_bajada`). Subir no cambia:
+  los agarres buenos de arriba salen de la cintura, que está en el área de
+  abajo. «Encima» = centro vertical de la caja del área más arriba en la
+  imagen; con una cámara cenital eso podría no ser la balda alta [sin
+  comprobar].
+- **Validado con la grabación:**
+
+  | Variante | Anaquel 1 | Anaquel 2 (falsos) |
+  |---|---:|---:|
+  | Antes | 2 | 1 |
+  | Con las dos reglas | 2 | 0 |
+  | Con una sola de las dos | 2 | 1 |
+  | Áreas movidas 8 px arriba o abajo | 2 | 0 |
+
+  **En vivo** (11:44): 2 agarres en el Anaquel 1 y 0 en el 2.
+- **Coste:** si alguien coge de arriba y luego de abajo sin bajar antes la
+  mano, el de abajo no cuenta hasta que la mano salga de las dos áreas.
+- **Descartado:** una ventana de 1 s tras salir de arriba (la propuso el
+  usuario): la mano tardaba ~3,4 s en asentarse abajo y no cambió nada.
+- `test_V3_transito_apilado_cuenta_solo_donde_se_asienta` tenía la balda
+  «alta» dibujada más abajo que la «baja», que con la regla nueva es una
+  bajada: se corrigió la geometría; comprueba lo mismo.
+
+### 14.7 Aviso de «posible agotado» (`anaqueles_stock.py`)
+
+- **Origen:** se lo pidieron al usuario a última hora; se escribió el 5-oct
+  por la tarde, fuera de esta sesión, y quedó sin commitear. Se commiteó el
+  6-oct tal cual, con su interruptor aparte.
+- **Qué hace:** con un botón del cliente se toma la foto «surtido» de cada
+  producto (POST `/api/anaqueles/<cámara>/stock/referencia`; se toma cuando
+  nadie lo tapa). Tras un agarre se vigilan TODOS los productos del área
+  (la muñeca no es la mano), comparando el recuadro con su foto cuando
+  nadie lo tapa. Tres medidas seguidas por encima del umbral dan la alerta
+  (panel de Anaqueles y columna «Stock» del panel de alertas, con la foto
+  antes y después), y se cierra sola si vuelve a parecerse a la foto.
+  Evidencias en `output/anaqueles/<cámara>/stock_alertas/`: fotos de
+  clientes, fuera de git.
+- **El umbral (0,45) NO está calibrado:** no hay ni una balda vaciada de
+  verdad. En el vídeo saltó «POSIBLE AGOTADO coffemate» (09:17:14 y
+  10:22:06) y «repuesto» a las 10:21:48, probablemente al volver a poner el
+  vídeo desde antes del agarre [deducido]; sin comprobar si el hueco es
+  real.
+- **Coste medido:** 0,1 ms por imagen sin nada que vigilar, 0,4 vigilando 8
+  productos y 2 ms forzado a comparar los 8 en cada imagen. **No era lo que
+  bajaba los fps** el 5-oct: minuto a minuto, la ida y vuelta subía con la
+  gente en pantalla (~80 ms con 1 persona, 120-160 con 2-3), también antes
+  de existir el stock. El cronómetro (14.4) lo repartió después: pose y
+  detector con alguien junto al estante, y los picos de edad/género y caras.
+
+### 14.8 Ajustes contados en imágenes, ahora en segundos (`ritmo_imagenes.py`)
+
+- **Por qué:** con más fps, un umbral en imágenes dura menos tiempo (el
+  usuario lo preguntó el 5-oct: ROI, fichas, género, track único).
+- **Cómo:** cada umbral exige lo MAYOR entre sus imágenes de siempre y sus
+  segundos a los fps medidos de la cámara (`imagenes_para`). Con
+  `FPS_REFERENCIA = 7,7` (la pasada G), a ~5-8 fps todo queda igual que
+  antes; solo se endurece al subir los fps. Cubre el agarre
+  (`agarre_min_s`, `agarre_rearme_s`), ByteTrack (`BYTETRACK_LOST_S`,
+  `BYTETRACK_MIN_CONSECUTIVE_S`), la histéresis y salidas del ROI, el
+  anti-duplicado, la cadencia de clasificación, la re-identificación por
+  cuerpo y las fichas.
+- **Resultado:** con más fps las entradas al ROI no se inflan (31 a 9,85
+  fps → 24 a 14,29, mismo tramo). Pero las entradas repetidas siguen
+  (hallazgo 35): la idea del 5-oct de que las causaban los umbrales en
+  imágenes no se sostiene (G 11 entradas, T2 29, S1 31).
+
+### 14.9 Varias cámaras (revisado leyendo el código el 6-oct)
+
+- Cada recuadro recibe TODAS las respuestas (`render_box.py:377`) y descarta
+  las ajenas ANTES del envío de la tarea 2 (`:1868-1877` frente a `:1893`).
+  Si no fuera así, B enviaría con una imagen pendiente, el servidor tiraría
+  la vieja (`ws_drenaje.py:102-119`) y B esperaría para siempre (hallazgo
+  30). Lo fija `test_la_respuesta_de_otra_camara_no_hace_enviar`, con dos
+  recuadros reales, verificada al revés.
+- Las respuestas de error al procesar llevan su destinatario: el servidor
+  reutiliza el sobre del mensaje (`ws_drenaje.py:208-211`, `:238-239`).
+- El modo F no mezcla cámaras: solo adelanta lo ya encolado.
+- **No hubo ninguna pasada con varias cámaras.**
+
+### 14.10 Probado y descartado
+
+- **Abrir el JPEG en la GPU** (nvJPEG): 8,1 → 5,8 ms contando bajar la
+  imagen a la CPU (el resto del sistema la necesita ahí), y la imagen sale
+  distinta (88 % de los píxeles, 3,9 niveles de media, hasta 36). No
+  compensa.
+- **Agrupar la pose sin prepararla en la GPU:** con 1 persona, peor (39
+  frente a 26 ms).
+- **La ventana de 1 s para la bajada** (14.6).
+
+### 14.11 Pendientes, por orden
+
+1. **Probar el modo F y la tarea 2 con iVMS en vivo**, con **varias
+   cámaras**, y con el servidor de Linux por el túnel.
+2. **Decisión del usuario: hallazgo 37** (contar cada vez que mete la mano
+   o una vez por visita).
+3. **Hallazgo 36:** los ~6 ms de más del detector con pose.
+4. **Edad/género y caras:** sus picos de 30-80 ms (14.4). Ver por qué se
+   juntan en las mismas imágenes y si se pueden repartir.
+5. **Hallazgo 35:** las entradas repetidas al ROI.
+6. **Hallazgo 30:** un tiempo máximo de espera en la ruta de ventana.
+7. **Stock:** calibrar el umbral con una balda vaciada de verdad.
+8. **Mano con codo → muñeca** (hallazgo 25), o redibujar los recuadros de
+   «coffemate» y «Nescafe».
+9. **Compartir ViTPose entre cámaras** (hallazgo 33).
+10. **Telemetría del cliente:** ampliar la rotación.
+11. Lo que sigue abierto de 13.10: fotos de las fichas pequeñas, modo de
+    copia y RTSP de iVMS, captura bajo pedido, y la lista del punto 9.
+
+### 14.12 Errores de esta sesión (no los repitas)
+
+1. **Estimar sin medir dentro del servidor:** «la pose es lo que frena el
+   agarre, 7 → 9-10 fps» (casi siempre se calcula a una persona, la ganancia
+   fue de 6-8 ms) y «abrir el JPEG en la GPU ahorra 6-8 ms» (fueron 2,3 ms
+   y otra imagen). Mide antes de proponer.
+2. **Dar solo medianas** de etapas que trabajan en unas imágenes sí y en
+   otras no: salen 0 y esconden los picos.
+3. **Afirmar sin leer el código** que un error del servidor «sin cámara»
+   desbloqueaba a todos los recuadros: nunca les llega.
+4. **Diseñar una regla antes de mirar la trayectoria:** la ventana de 1 s
+   para la bajada no hacía nada; el diagnóstico imagen a imagen enseñó la
+   mano duplicada.
+5. **Calcular de memoria el tamaño de una grabación:** dije ~150 MB y
+   fueron 601 MB (1.200 imágenes a calidad 95).
+6. **Leer y reescribir un fichero UTF-8 con `Get-Content`/`Set-Content`**
+   de PowerShell 5.1: rompió los acentos. Usa las herramientas de edición
+   o `-Encoding utf8` también al leer.
