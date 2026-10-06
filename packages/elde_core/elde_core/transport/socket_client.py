@@ -1,3 +1,73 @@
+"""elde_core/transport/socket_client.py — conexión websocket del cliente.
+
+## Modo F: cada imagen sale al socket en el acto (6-oct-2026)
+
+F de `flush()`. Tras `sendBinaryMessage`, `send_binary_frame` llama a
+`self.client.flush()`.
+
+**El problema.** `QWebSocket.sendBinaryMessage` no manda nada: deja el
+mensaje en el búfer de Qt, que lo escribe en el socket cuando el hilo vuelve
+a su bucle de eventos. Desde la tarea 2 (5-oct, `render_box.py`), el
+recuadro envía la imagen siguiente y JUSTO DESPUÉS pinta la respuesta
+anterior (~18 ms) en el mismo hilo: la imagen esperaba en el búfer a que
+terminara el pintado. Medido con el cronómetro por etapas del servidor
+(`tiempos_etapas.py`) y la telemetría del cliente (`telemetria_ciclo.py`),
+cliente y servidor en el mismo PC (mismo reloj), 6.209 imágenes: de «envío»
+a «el servidor empieza», 27 ms de mediana (31 de media); la única imagen
+enviada sin pintar detrás, 0,8 ms.
+
+**Lo medido con el modo F** (mismo tramo de 535 s del vídeo de la cámara 3,
+1,42 frente a 1,43 personas de media, el servidor igual de rápido): 9,85 →
+14,29 imágenes/s; la ida pasa a ~0; enviar cuesta 0,40 → 0,70 ms (mediana;
+máx. 2,3): `flush()` NO espera a la red, solo empuja lo que ya está en el
+búfer. 0 errores en 7.643 imágenes. No cambia QUÉ se envía, solo CUÁNDO.
+Con varias cámaras comparten este socket: solo adelanta lo ya encolado.
+
+## Cómo llevarlo a otro proyecto
+
+1. **¿Le sirve?** Ayuda cuando se cumplen las tres cosas (deducido de lo de
+   arriba; solo medido en este cliente):
+   - el envío queda en un búfer que se vacía al volver al bucle de eventos
+     (así funcionan `QWebSocket` y los sockets de Qt, `QAbstractSocket`);
+   - el MISMO hilo hace algo largo justo después de enviar (pintar,
+     decodificar, guardar…);
+   - se espera la respuesta antes de mandar la siguiente (una en vuelo):
+     cada ms que la imagen espera es un ms más de ciclo.
+   Si tras enviar se vuelve enseguida al bucle, apenas cambiará nada.
+2. **Medirlo antes.** Hora de envío en el cliente y hora en que el servidor
+   EMPIEZA a procesar. En el mismo PC, restarlas sin más; en máquinas
+   distintas los relojes no coinciden: compara (ida y vuelta − proceso del
+   servidor) con lo que debería tardar el envío (tamaño / ancho de banda).
+   Si sobra mucho y crece con lo que el cliente hace tras enviar, es esto.
+3. **Aplicarlo.** Justo después de cada envío, `flush()` del MISMO objeto
+   socket (en PySide6/PyQt: `QWebSocket.flush()` o `QAbstractSocket.flush()`).
+   Aquí solo lo lleva `send_binary_frame`; `send_frame` (texto/JSON) no lo
+   lleva porque nadie lo usa en este repositorio: un cliente que lo use
+   necesita la misma línea tras `sendTextMessage`.
+4. **Comprobarlo.** Una pasada A/B sobre el MISMO tramo (misma gente en
+   pantalla, mismo proceso del servidor): fps, ida, coste de enviar y
+   errores. La prueba `tests/test_socket_flush.py` fija el orden enviar →
+   flush.
+5. **Otras librerías** (websockets de asyncio, un navegador…) escriben en
+   el socket de otra forma: NO está comprobado si tienen el problema. Mide
+   (paso 2) antes de tocar nada.
+
+## Cómo apagarlo (y volver a encenderlo)
+
+Encendido por defecto. Para apagarlo, `ELDE_MODO_F=0` (también vale
+`false`, `no` u `off`) y reiniciar el cliente. Lo más cómodo es una línea
+`ELDE_MODO_F=0` en el `.env` del cliente (`clients/tienda/.env`): lo carga
+`main.py` antes de crear esta conexión, así que vale también arrancando con
+`INICIAR_TIENDA.bat` (que pierde las variables puestas en la consola). Una
+variable puesta en la consola manda sobre el `.env`. Para volver a
+encenderlo: quitar la línea o poner `ELDE_MODO_F=1`. El log del cliente dice
+al arrancar en qué estado quedó (en la tienda, `clients/tienda/logs/
+tienda.log`: «modo F (empujar cada imagen al socket): encendido» o
+«APAGADO por ELDE_MODO_F»). Sin el modo F, el envío es el de antes del
+6-oct.
+"""
+import os
+
 from PySide6.QtWebSockets import QWebSocket
 from PySide6.QtCore import QObject, Signal, QUrl, QTimer, Slot
 from PySide6.QtNetwork import QAbstractSocket
@@ -7,6 +77,16 @@ import msgpack
 from ..logging import obtener
 
 log = obtener(__name__)
+
+#: Interruptor del modo F (ver la cabecera). Sin la variable: encendido.
+VARIABLE_MODO_F = 'ELDE_MODO_F'
+
+
+def modo_f_activado() -> bool:
+    """True salvo `ELDE_MODO_F` = 0 / false / no / off (en mayúsculas o
+    minúsculas). Cualquier otro valor, o la variable ausente: encendido."""
+    valor = os.getenv(VARIABLE_MODO_F, '1').strip().lower()
+    return valor not in ('0', 'false', 'no', 'off')
 
 
 class Socket_services(QObject):
@@ -28,6 +108,14 @@ class Socket_services(QObject):
         self._manual_stop = False
         self.type_inference = type_inference
         self.id_connection = None
+        # Modo F (ver la cabecera): se lee UNA vez, al crear la conexión.
+        self.modo_f = modo_f_activado()
+        try:
+            log.info('modo F (empujar cada imagen al socket): %s',
+                     'encendido' if self.modo_f
+                     else f'APAGADO por {VARIABLE_MODO_F}')
+        except Exception:
+            pass
         self.client = QWebSocket()
         self.client.connected.connect(self._on_connected)
         self.client.disconnected.connect(self._on_disconnected)
@@ -203,6 +291,14 @@ class Socket_services(QObject):
          
             binary_data = msgpack.packb(data_to_send)
             self.client.sendBinaryMessage(binary_data)
+            # Modo F (6-oct-2026, ver la cabecera): `sendBinaryMessage` solo
+            # deja el mensaje en el búfer de Qt y el recuadro pinta justo
+            # después; sin esto la imagen esperaba al pintado (27 ms de
+            # mediana). `flush()` la empuja ya, sin esperar a la red.
+            # `getattr`: si algo creara la conexión sin pasar por __init__,
+            # el modo F sigue encendido, que es el valor por defecto.
+            if getattr(self, 'modo_f', True):
+                self.client.flush()
         except Exception as e:
             print(e)
     
