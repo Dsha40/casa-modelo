@@ -59,6 +59,16 @@ log = obtener(__name__)
 #: coma la memoria.
 MAX_BUFFER = 128 * 1024 * 1024
 
+#: Segundos sin respuesta del servidor tras los que la ruta de VENTANA da la
+#: imagen en vuelo por perdida y vuelve a enviar (8-oct-2026). Sin esto, el
+#: 8-oct a las 05:45:20 se perdió una respuesta y el recuadro se quedó 3 h 27
+#: min sin enviar nada: el servidor esperaba imágenes y el recuadro, la
+#: respuesta; ninguno dejó un error. La ruta DVR ya tenía la suya (10 s,
+#: `render_box._on_dvr_frame`). 5 s y no menos: al arrancar, el servidor tarda
+#: 45-60 s en la primera imagen (carga de modelos); en ese rato solo se
+#: reenvía alguna de más, y su cola se queda con la última (`ws_drenaje`).
+ESPERA_RESPUESTA_MAX_S = 5.0
+
 
 class CapturaDVRMixin:
     """Stream DVR y bucle de envio, compartidos por los cuatro clientes."""
@@ -503,8 +513,36 @@ class CapturaDVRMixin:
         self._pending_frame_bytes = image_bytes
         self.socket.send_binary_frame(self.component_key, data)
         self.can_send_next_frame = False
+        self._frame_en_vuelo_ts = time.time()
         if tel is not None:
             tel.marcar('t_envio')
+
+    def _liberar_si_respuesta_perdida(self) -> bool:
+        """Red de seguridad de la ruta de ventana: si la imagen en vuelo lleva
+        más de `ESPERA_RESPUESTA_MAX_S` sin respuesta, se da por perdida y el
+        recuadro vuelve a poder enviar. True si liberó.
+
+        Se apunta en el registro (la 1.ª vez y luego una vez por minuto con
+        la cuenta): el corte del 8-oct no dejó rastro en ningún lado."""
+        if not self.smart_mode or self.can_send_next_frame:
+            return False
+        enviado = getattr(self, '_frame_en_vuelo_ts', None)
+        if enviado is None:
+            return False
+        ahora = time.time()
+        if ahora - enviado <= ESPERA_RESPUESTA_MAX_S:
+            return False
+        self.can_send_next_frame = True
+        self._frame_en_vuelo_ts = None
+        self._respuestas_perdidas = getattr(self, '_respuestas_perdidas', 0) + 1
+        if ahora - getattr(self, '_aviso_perdida_ts', 0.0) >= 60.0:
+            self._aviso_perdida_ts = ahora
+            log.warning(
+                "recuadro %s: sin respuesta del servidor en %.0f s; se da por "
+                "perdida y se vuelve a enviar (%d en total)",
+                getattr(self, 'index', '?'), ahora - enviado,
+                self._respuestas_perdidas)
+        return True
 
     def enviar_captura_guardada(self) -> bool:
         """Envia YA la captura guardada mientras habia una en vuelo, si la hay
@@ -623,6 +661,7 @@ class CapturaDVRMixin:
                         self, "min_perm_vehiculos", None),
                 }
                 previa = getattr(self, '_captura_guardada', None)
+                self._liberar_si_respuesta_perdida()
                 if self.smart_mode and self.can_send_next_frame:
                     # Los intermedios del mismo lote, y la guardada si la
                     # habia, se tiran: va la mas reciente.
