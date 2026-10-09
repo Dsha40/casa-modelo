@@ -120,6 +120,24 @@ def test_la_respuesta_de_otra_camara_no_hace_enviar():
     assert diario_b[0] == ('enviar', b'B')
 
 
+def test_los_ids_de_seguimiento_solo_con_la_opcion():
+    """Vista → «IDs de seguimiento» (6-oct-2026): con la opción, lo que se
+    pinta lleva `#<tracker_id>`; sin ella, la etiqueta de siempre."""
+    from gui.components.render_box.render_box import Render_box
+    caja = Render_box(index=0, socket_services=_SocketFalso([]),
+                      callback_save_data=lambda i, k, v: None)
+    pintado = []
+    caja._try_supervision_overlay = (
+        lambda det, jpeg=None: pintado.append(det) or True)
+    det = [{'box': [1, 2, 3, 4], 'label': 'Personas', 'tracker_id': 42}]
+    caja._draw_detections_and_show(det, b'jpeg')
+    assert pintado[-1][0]['label'] == 'Personas'
+    caja._toggle_ids()
+    caja._draw_detections_and_show(det, b'jpeg')
+    assert pintado[-1][0]['label'] == '#42 Personas'
+    assert det[0]['label'] == 'Personas'            # el original, intacto
+
+
 def test_apagar_la_ia_olvida_la_guardada():
     caja, _ = _recuadro()
     _en_vuelo_A_con_B_guardada(caja)

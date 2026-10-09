@@ -59,6 +59,7 @@ from elde_core.ui import identidad_camara as _identidad
 from elde_core.ui.render_box_captura import CapturaDVRMixin
 from elde_core.ui.render_box_puerta import PuertaDireccionalMixin
 from elde_core.ui import overlay_munecas as _munecas
+from elde_core.ui import etiqueta_seguimiento as _etiqueta_id
 from elde_core.ui import telemetria_ciclo as _telemetria
 from elde_core.ui.selector_local_camara import (
     SelectorLocalCamara, SIN_LOCAL_USA_EL_PIE)
@@ -295,6 +296,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self._munecas_ultimas = []
         self._munecas_ts = None
         self._munecas_boolean = bool(munecas_boolean)
+        # «#<tracker_id>» en cada caja, para comprobar que ByteTrack sigue
+        # bien a cada persona (6-oct-2026, `etiqueta_seguimiento.py`). De
+        # diagnóstico: no se guarda, arranca apagado.
+        self._ids_boolean = False
         # Marcas de tiempo por fotograma, a un JSONL (ver telemetria_ciclo).
         # El servidor midio un ciclo de 156 ms con ~99 de «espera» que desde
         # alli no se puede desglosar; esto lo mide desde este lado.
@@ -1192,6 +1197,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self._munecas_boolean = not self._munecas_boolean
         self._save_all("munecas_boolean", self._munecas_boolean)
 
+    def _toggle_ids(self):
+        self._ids_boolean = not self._ids_boolean
+
     def _toggle_regla(self):
         regla = self.imagen_label.regla
         regla.activa = not regla.activa
@@ -1310,6 +1318,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         # unico que manda munecas.
         self._add_toggle(menu, "Munecas del anaquel (diagnostico)",
                          self._munecas_boolean, self._toggle_munecas)
+        # Comprobar que ByteTrack conserva el número de cada persona.
+        self._add_toggle(menu, "IDs de seguimiento (diagnostico)",
+                         self._ids_boolean, self._toggle_ids)
         # Diagnostico de rendimiento: el operador la enciende, usa el cliente
         # y la sesion de soporte lee el fichero despues. La ruta se ensenia
         # aqui mismo para que no haya que buscarla.
@@ -1749,6 +1760,8 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         jpeg = jpeg or self._pending_frame_bytes
         if not jpeg:
             return
+        if getattr(self, '_ids_boolean', False):
+            detections = _etiqueta_id.con_id(detections)
         if self._try_supervision_overlay(detections, jpeg):
             return
         pixmap = QPixmap()
