@@ -1,8 +1,8 @@
 # CLAUDE.md — ELDE Tiendas (contexto de trabajo)
 
 Traspaso de las sesiones del 16-18, 21-22, 23, 24, 25, 28, 29 y **30 de
-septiembre de 2026** (actualizado el 1-oct; **secciones 12, 13 y 14 añadidas
-el 2, el 5 y el 6-oct por la sesión del CLIENTE**). **Este archivo SÍ se
+septiembre de 2026** (actualizado el 1-oct; **secciones 12, 13, 14 y 15
+añadidas el 2, el 5, el 6 y el 9-oct por la sesión del CLIENTE**). **Este archivo SÍ se
 commitea**: vive en la rama para que la siguiente sesión lo lea sin que el
 usuario tenga que pegarlo.
 
@@ -18,9 +18,10 @@ sus commits** (los del 5-oct, 13.1, y los del 6-oct, 14.1) a
 `fork/feature/anaquel`.
 
 > **¿Eres la próxima sesión del CLIENTE (Windows)? Empieza por la sección
-> 14** (6-oct): el estado del código, lo medido y lo pendiente. La 13 (2 y
-> 5-oct) y la 12 (1-2 oct) siguen valiendo como contexto; sus pendientes
-> están recogidos en 14.11.
+> 15** (7-9 oct): clasificador nuevo oficial, stock nuevo, MUCHO código sin
+> commitear (15.0) y lo medido con etiquetas a mano. La 14 (6-oct), la 13
+> (2 y 5-oct) y la 12 (1-2 oct) siguen valiendo como contexto; los
+> pendientes vigentes están en 15.10.
 
 **Donde este archivo dé una cifra, mira su fecha.** Las cifras de horas o días
 de producción mandan sobre las de minutos de vídeo.
@@ -218,7 +219,8 @@ cd server && ELDE_TIENDA_DB=<scratchpad>/tienda_pruebas.db PYTHONPATH=<scratchpa
 
 **Línea base (30-sep): `852 passed, 16 skipped, 2 xfailed`.** Si ves un
 `failed`, es tuyo. **En el PC de Windows** (6-oct): `941 passed, 15
-skipped, 1 xfailed` con el código de la sección 14 (el 5-oct, 876); la
+skipped, 1 xfailed` con el código de la sección 14 (el 5-oct, 876; **el
+9-oct, 964 passed** con el código sin commitear de la sección 15); la
 diferencia de skipped/xfailed con Linux ya estaba antes de esos cambios
 (sección 13.2). Cliente en Windows (6-oct): `clients/tienda/test` 30
 passed; `packages/elde_core` 377 passed y los 72 fallos de siempre (13.2). Las de `packages/elde_core` necesitan PySide6: aquí no
@@ -1822,3 +1824,185 @@ Lo explica, con cómo llevarlo a otro proyecto, la cabecera de
 6. **Leer y reescribir un fichero UTF-8 con `Get-Content`/`Set-Content`**
    de PowerShell 5.1: rompió los acentos. Usa las herramientas de edición
    o `-Encoding utf8` también al leer.
+
+---
+
+## 15. Sesión del CLIENTE en Windows (7, 8 y 9 oct)
+
+Escrito el 9-oct por la sesión del cliente, para la siguiente. Medido en el
+PC `DESKTOP-9LHHJI2` con **iVMS en vivo (cámara 3)** salvo lo marcado como
+**deducido**. Horas locales (Venezuela). Informes del usuario de estos días
+(local, fuera de git): `informe_2026-10-07.md`, `_07_dia.md`,
+`_08_noche.md`, `_08_dia.md` e `informe_2026-10-09.md`.
+
+### 15.0 Para empezar: TODO esto está SIN COMMITEAR
+
+`git status` el 9-oct: el código de la sección 14 que no se subió (grafos
+de CUDA, IDs de seguimiento, perfil de la cámara 3) más todo lo de esta
+sección. **Nada commiteado ni subido.** Al commitear, uno por
+funcionalidad, enseñando antes archivos y mensajes (sección 0):
+
+| Funcionalidad | Archivos |
+|---|---|
+| Grafos de CUDA | `grafo_cuda.py`, `estimador_edad_genero.py`, `pose_motor.py`, `test_grafo_cuda.py` |
+| IDs de seguimiento en el recuadro | `etiqueta_seguimiento.py`, `render_box.py` (parte), `test_etiqueta_seguimiento.py`, `test_envio_antes_de_pintar.py` |
+| Perfil de la cámara 3 (filtro 220 px) | `server/config/camera_profiles/win-iVMS-4200-c3.json`, `test_filtro_fondo.py` |
+| Red de seguridad del recuadro (15.1) | `render_box_captura.py`, `test_respuesta_perdida.py` |
+| Clasificador B oficial (15.4) | `clasificador_b.py`, `tiendas.py`, `config.py`, `test_clasificador_b.py` |
+| Clasificación en sombra (diagnóstico) | `clasificacion_sombra.py`, `app.py` (parte) |
+| Stock en el dashboard (15.7) | `dashboard_stock.py`, `dashboard.py`, `app.py` (parte), `test_dashboard_stock.py` |
+| Stock: fotos por producto, diaria, bajadas (15.7) | `anaqueles_stock.py`, `anaqueles.py`, `anaqueles_api.py`, `render_box.py` (parte), `test_anaqueles_stock_bajadas.py`, `test_anaqueles_stock.py` |
+
+**Pruebas el 9-oct:** servidor `964 passed, 15 skipped, 1 xfailed`;
+`clients/tienda/test` 31 passed; las de `elde_core` tocadas, en verde.
+
+**Estado al cerrar (9-oct):**
+- servidor arrancado a las 12:14 en su modo normal: clasificador B, sin
+  sombra, sin cronómetro y sin grabador. Script de reinicio:
+  `reiniciar_oficial.ps1` del scratchpad. El servidor viejo a veces no se
+  apaga: mirar procesos tras reiniciar;
+- **desde las 09:23 el usuario tiene la IA apagada** a propósito: nada de
+  lo de hoy se ha visto aún con gente;
+- **el programa de la tienda no se ha reiniciado** desde el 8-oct: no lleva
+  todavía la red de seguridad (15.1) ni el menú de fotos por producto.
+
+**Interruptores nuevos:**
+
+| Interruptor | Qué hace | Por defecto |
+|---|---|---|
+| `ELDE_CLASIFICADOR=clasico` (o `DEMO_CLASIFICADOR` en `config.py`) | vuelve al clasificador anterior | `b` |
+| `ELDE_CLASIFICACION_SOMBRA=<ruta .jsonl>` | clasifica también con B a la sombra y lo apunta aparte | apagado |
+| `stock_umbral` / `stock_umbral_bajada` / `stock_bajadas_aviso` / `stock_reinicio_diario` (`_DEFECTOS` de `anaqueles.py`) | stock (15.7) | 0,90 / 0,45 / 8 / `07:30` |
+
+**Material en el scratchpad** (fotos de clientes: borrar al terminar, con
+permiso; el scratchpad es de la sesión y puede no seguir ahí):
+`banco_clasificacion\` (banco, variantes, grabaciones del 7-oct y del 8-oct
+18:00-20:05, ~1,5 GB cada una, y las etiquetas a mano `etiquetas.csv`, 201,
+y `etiquetas_8oct.csv`, 283), `grabacion_agarre\` (601 MB),
+`tiempos_etapas.jsonl` (619 MB), `sombra_8oct.jsonl`,
+`telemetria_noche_8oct\`, `imagenes_fijas\`.
+
+### 15.1 El corte del 8-oct 05:45: hallazgo 30 en producción
+
+- **3 h 27 min sin datos** (05:45:20 → 09:12), incluida la apertura.
+- El servidor procesó bien su última imagen. Con py-spy: **ningún hilo
+  atascado**; el servidor esperaba imágenes y el recuadro esperaba la
+  respuesta de la última: **se perdió un mensaje** y nadie dejó error. No
+  se sabe qué lado lo perdió.
+- **Arreglo (sin commitear):** `ESPERA_RESPUESTA_MAX_S = 5.0` en
+  `render_box_captura.py`: a los 5 s sin respuesta la ruta de ventana da la
+  imagen por perdida, lo apunta en `tienda.log` y vuelve a enviar. 4
+  pruebas, verificadas al revés.
+- La telemetría del cliente solo escribe el ciclo al terminarlo: su «todo
+  ok» final no descarta una imagen en vuelo sin respuesta.
+
+### 15.2 iVMS: la imagen fija y las imágenes repetidas
+
+- **8-oct 11:42-11:58** iVMS dejó de dar vídeo: llegaba siempre la misma
+  imagen (~42 KB). **Es la misma de las madrugadas.** Hipótesis sin
+  comprobar: «la noche oscura» de los informes sería iVMS sin vídeo. Copia
+  en `imagenes_fijas\` del scratchpad para que el usuario la mire.
+- **El 41-64 % de las imágenes enviadas son copias exactas de la anterior**
+  (tarde del 8-oct): iVMS refresca a ~9 img/s y el cliente copia a ~18. El
+  servidor procesa la mitad dos veces. Pendiente: no enviar repetidas.
+
+### 15.3 El PC sin memoria (8-oct ~10:20)
+
+Quedaban 0,7 GB: servidor 5 GB, programa de la tienda 1,85 GB y su
+capturador 545 MB, los dos creciendo desde el corte [deducido: por el
+recuadro atascado]. El usuario reinició el PC y liberó disco (39,5 GB
+libres). Vigilar la memoria del cliente.
+
+### 15.4 Clasificación: banco, etiquetas y el clasificador B
+
+**Por qué casi todo era «muestras insuficientes»** (leído en el código):
+exige 5 lecturas con 90 % de acuerdo; busca la cara hasta 3 veces por
+intento; InsightFace tira la lectura si no coinciden sus variantes; el
+cuerpo no se intenta fuera de proporción 1,2-4,0; el jurado va por número
+de seguimiento y se tira a los 0,65 s sin ver a la persona.
+
+**Banco aislado** (scratchpad, fuera del repo): un `sitecustomize.py` graba
+recortes; `banco.py` los pasa por el clasificador y sus variantes; el
+usuario etiquetó a mano. Grabación del 7-oct, 201 etiquetas:
+
+| Variante | Decididas | Acierto |
+|---|---:|---:|
+| Clásico | 41 % | 88,5 % |
+| **B sin herencia** | **80 %** | **90,6 %** |
+
+**En vivo, en sombra** (8-oct 18:00-20:05, 251 etiquetas): clásico 27 % y
+87 %; **B 63 % y 94,9 %**; mujeres bien clasificadas 15 frente a 62. **8 de
+los 9 errores del clásico eran géneros heredados** del reconocimiento de
+caras.
+
+**B** (`clasificador_b.py`): una búsqueda de cara por intento; vota solo
+MiVOLO (cara sin alinear + cuerpo); cuerpo de proporción 1,0-5,0; decide por
+evidencia (log-odds, umbral ln 19, descuento 0,5, tope 3, mínimo 2
+lecturas, máx. 25 % de desacuerdo); **no hereda el género** del Re-ID (que
+sigue sirviendo para la identidad); sin histéresis; cadencia
+`DEMO_RECLASSIFY_EVERY_B = 5`. **Oficial desde el 9-oct 10:34**, sin
+probar aún con gente.
+
+**Descartado al medir:** no tirar las caras dudosas del TTA, jurado de 9 s,
+coser trozos de seguimiento.
+
+### 15.5 Por qué al anochecer se clasificaba la mitad
+
+No faltaban lecturas: hubo más. Los jurados mezclaban **cara (InsightFace)
+y cuerpo (MiVOLO)**, que se contradicen, y la regla del 90 % bloqueaba. El
+usuario descartó la luz. Con B vota un solo modelo.
+
+### 15.6 Seguimiento (ByteTrack)
+
+- **Probado y quitado:** `BYTETRACK_MATCH_THRESH` 0,9 (7-oct): en vivo dos
+  personas se intercambiaron el número.
+- **Con el ajuste normal, el número cambia de persona en el 11-15 %** de
+  los etiquetados (30 de 201, 32 de 283). **Siguiente problema grande.**
+  Idea: cortar el jurado cuando la huella del cuerpo cambie de golpe.
+
+### 15.7 Stock
+
+- **Dashboard** (`dashboard_stock.py`): «Stock — posible agotado» con las
+  alertas activas (contador «lleva X»), el historial con fotos y las
+  bajadas. **Las alertas activas viven en memoria: un reinicio las borra.**
+- **Tres formas de foto de referencia:** manual de todos o de **un
+  producto** (`?area=&producto=`, submenú del cliente); **diaria a las
+  7:30** (apuntada en `stock_ref/ultima_diaria.txt`; la del 9-oct se dio
+  por hecha); y **rehecha tras cada bajada** confirmada.
+- **Bajada** = cambio ≥ 0,45 tres veces seguidas tras un agarre; se cuenta y
+  cada 8 avisa «Cerca de vaciarse» (`..._cerca.jpg`). **Posible agotado** ≥
+  0,90 (antes 0,45). Umbrales elegidos por el usuario viendo las fotos;
+  **sin calibrar**.
+- **7 alarmas en vivo el 7-8 oct** (cambio 0,46-0,84: con 0,90 ninguna
+  habría saltado). **Ninguna se cerró por reposición**: todas las borró un
+  reinicio.
+- Las pruebas de stock usan umbrales propios.
+
+### 15.8 Otros datos
+
+- Filtro del fondo de la cámara 3: **220 px** desde el 9-oct (antes 200).
+- Agarres del 8-oct tarde: 4 de 3 personas; el clásico no decidió a
+  ninguna; la sombra, a 1 (coincide con la etiqueta).
+- Desde el filtro del fondo: identificadas 30-35 %, clasificadas 21-26 %
+  (clásico).
+
+### 15.9 Errores de esta sesión (no los repitas)
+
+1. **Hipótesis dadas como causa** («detecciones débiles», «la luz»): medir
+   antes.
+2. **Un vigilante que copiaba un archivo inexistente** (el mapa de calor se
+   pinta bajo pedido; el fondo está en `heatmap/bg/`).
+3. **Rutas de Windows con `sed` o escapes** (`\a`, `\7`) rompieron scripts:
+   usar la herramienta de escritura.
+4. **No comprobar que el servidor viejo se había apagado.**
+
+### 15.10 Pendientes, por orden
+
+1. **Commitear** lo de 15.0 (con permiso, uno por funcionalidad).
+2. **Ver B y el stock nuevo con gente**; reiniciar el programa de la tienda.
+3. **Cambios de persona en el seguimiento** (15.6).
+4. **No enviar imágenes repetidas** (15.2).
+5. **Guardar las alertas de stock en disco**; calibrar umbrales.
+6. **Mirar la imagen fija de la noche** con el usuario.
+7. Borrar, con permiso, grabaciones y cronómetro (15.0).
+8. Lo abierto de 14.11.
