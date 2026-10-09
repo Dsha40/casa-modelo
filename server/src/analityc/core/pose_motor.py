@@ -71,6 +71,22 @@ def _avisar_pesos_ausentes() -> None:
         "3-sep-2026)", RUTA_VITPOSE)
 
 
+def _SoloMapas(modelo: Any) -> Any:
+    """El modelo con una salida que un grafo de CUDA pueda guardar: solo el
+    tensor de mapas de calor (la salida de Hugging Face es un objeto)."""
+    import torch
+
+    class _Mapas(torch.nn.Module):
+        def __init__(self, m):
+            super().__init__()
+            self.m = m
+
+        def forward(self, x):
+            return self.m(pixel_values=x).heatmaps
+
+    return _Mapas(modelo)
+
+
 class _MotorViTPose:
     """ViTPose-base sobre la imagen ENTERA: quien llama ya recortó a la
     persona, así que la caja del top-down es `[0, 0, w, h]`.
@@ -88,6 +104,9 @@ class _MotorViTPose:
         self._procesador = None
         self._intentado = False
         self._lock = threading.Lock()
+        #: Un grafo de CUDA no se repite desde dos hilos a la vez.
+        self._lock_grafo = threading.Lock()
+        self._grafos: Any = None
 
     @property
     def disponible(self) -> bool:
@@ -123,6 +142,11 @@ class _MotorViTPose:
                 if self._fp16:
                     modelo = modelo.half()
                 self._modelo = modelo.to(disp).eval()
+                # Grafo de CUDA (6-oct-2026, `grafo_cuda.py`): mismos mapas,
+                # 13,6 -> 4,2 ms con 1 persona en la Quadro RTX 4000.
+                from .grafo_cuda import GrafosPorLote
+                self._grafos = GrafosPorLote(_SoloMapas(self._modelo),
+                                             'ViTPose')
                 logger.info("pose: ViTPose cargado (%s, %s)", disp,
                             'fp16' if self._fp16 else 'fp32')
             except Exception as exc:                        # noqa: BLE001
@@ -131,6 +155,25 @@ class _MotorViTPose:
                 # Con o sin éxito, no se reintenta: un peso corrupto que
                 # relanzara la carga en cada frame congelaría el bucle.
                 self._intentado = True
+
+    def _mapas(self, pv: Any) -> Any:
+        """Salida del modelo con `.heatmaps` en float32 (el posproceso los
+        pasa por scipy: en float16 el filtro gaussiano no está garantizado).
+        Con grafo de CUDA si se puede; si no, el modelo de siempre."""
+        import torch
+        from types import SimpleNamespace
+        grafos = getattr(self, '_grafos', None)
+        if grafos is not None:
+            with self._lock_grafo:
+                mapas = grafos.ejecutar(pv)
+            if mapas is not None:
+                return SimpleNamespace(heatmaps=mapas.float())
+        # Sin grafo: exactamente el camino de antes del 6-oct.
+        with torch.inference_mode():
+            salida = self._modelo(pixel_values=pv)
+        if self._fp16:
+            salida.heatmaps = salida.heatmaps.float()
+        return salida
 
     def keypoints_17(self,
                      imagen_bgr: np.ndarray) -> Optional[List[List[float]]]:
@@ -151,12 +194,7 @@ class _MotorViTPose:
             pv = entradas['pixel_values'].to(self._dispositivo)
             if self._fp16:
                 pv = pv.half()
-            with torch.inference_mode():
-                salida = self._modelo(pixel_values=pv)
-            if self._fp16:
-                # El post-proceso pasa los heatmaps por scipy en numpy;
-                # en float16 el filtro gaussiano no está garantizado.
-                salida.heatmaps = salida.heatmaps.float()
+            salida = self._mapas(pv)
             res = self._procesador.post_process_pose_estimation(
                 salida, boxes=cajas)
             pose = res[0][0]
@@ -195,10 +233,7 @@ class _MotorViTPose:
                                    self._procesador.image_mean,
                                    self._procesador.image_std,
                                    self._dispositivo, self._fp16)
-            with torch.inference_mode():
-                salida = self._modelo(pixel_values=pv)
-            if self._fp16:
-                salida.heatmaps = salida.heatmaps.float()
+            salida = self._mapas(pv)
             # Una «imagen» por recorte, con su caja = el recorte entero: así
             # el posproceso devuelve coordenadas del recorte, como antes.
             coco = [[[0.0, 0.0, float(x2 - x1), float(y2 - y1)]]
