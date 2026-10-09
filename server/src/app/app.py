@@ -112,6 +112,14 @@ async def lifespan(app: FastAPI):
         tiempos_etapas.instalar()
     except Exception as exc:                                # noqa: BLE001
         logger.debug("tiempos_etapas no disponible: %s", exc)
+    # Clasificación en sombra (8-oct-2026, prueba): sin
+    # ELDE_CLASIFICACION_SOMBRA no hace nada; con ella, una segunda forma de
+    # clasificar apunta aparte lo que habría decidido, sin tocar la actual.
+    try:
+        from ..analityc.core import clasificacion_sombra
+        clasificacion_sombra.instalar()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("clasificacion_sombra no disponible: %s", exc)
     # Baliza de descubrimiento (UDP): responde a los clientes que preguntan
     # "¿que servidores ELDE hay en esta red?". El puerto real lo pone quien
     # arranca uvicorn (iniciar_servidor_headless.py exporta ELDE_PUERTO_
