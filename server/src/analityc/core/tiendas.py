@@ -30,6 +30,9 @@ from . import ritmo_imagenes
 from .analytics.config import AnalyticsConfig
 from .analytics.demographics import (DemographicsClassifier,
                                      _load_camera_profile)
+# Clasificador oficial desde el 9-oct-2026 («B sin herencia»; el clásico,
+# con ELDE_CLASIFICADOR=clasico). Ver la cabecera de clasificador_b.py.
+from .analytics import clasificador_b
 from .analytics.face_reidentifier import FaceReidentifier
 from .analytics.body_reidentifier import BodyReidentifier
 from .analytics.people_counter import PeopleCounter
@@ -349,6 +352,11 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             # repartir la carga. Configurable en AnalyticsConfig.
             self._classify_every_n = max(
                 1, int(getattr(AnalyticsConfig, 'DEMO_RECLASSIFY_EVERY', 6)))
+            # El clasificador B se validó mirando cada ~0,6 s (9-oct-2026):
+            # 5 imágenes a 7,7 fps, en tiempo real con `_imagenes`.
+            if clasificador_b.usar_b():
+                self._classify_every_n = max(1, int(getattr(
+                    AnalyticsConfig, 'DEMO_RECLASSIFY_EVERY_B', 5)))
             # Umbral de altura relativa para niño (fallback sin modelo de edad)
             self.child_height_ratio = 0.30
 
@@ -416,7 +424,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             else:
                 self._body_reidentifier = None
 
-            self._demographics = DemographicsClassifier(
+            self._demographics = clasificador_b.crear(
                 gender_net=self._gender_net,
                 age_net=self._age_net,
                 face_cascade=self._face_cascade,
@@ -1013,7 +1021,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             state['entry_counts'] = {'Hombres': 0, 'Mujeres': 0, 'Niños': 0, 'Personas': 0}
         # Migrar analytics por camara
         if '_demographics' not in state:
-            state['_demographics'] = DemographicsClassifier(
+            state['_demographics'] = clasificador_b.crear(
                 gender_net=self._gender_net,
                 age_net=self._age_net,
                 face_cascade=self._face_cascade,

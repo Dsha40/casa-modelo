@@ -676,6 +676,13 @@ class AnalyticsConfig:
     # picos). Sube el numero para mas FPS (menos intentos/seg); bajalo para
     # converger mas rapido la demografia. No afecta los umbrales de precision.
     DEMO_RECLASSIFY_EVERY: int = 10
+    # Clasificador oficial (9-oct-2026): "b" = «B sin herencia»
+    # (`clasificador_b.py`; medido en vivo 63 % decididas y 94,9 % de
+    # acierto frente a 27 % y 87 % del clásico). "clasico" = el de antes.
+    # La variable ELDE_CLASIFICADOR manda sobre este valor.
+    DEMO_CLASIFICADOR: str = "b"
+    # Cadencia con el clasificador B: 5 imágenes a 7,7 fps (~0,65 s).
+    DEMO_RECLASSIFY_EVERY_B: int = 5
 
     # Taxonomia GRUESA de edad para resultados solo-corporales (age_source=body)
     # Forma: (min, max, etiqueta). El maximo del ultimo bin cubre 60+.
