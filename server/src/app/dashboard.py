@@ -708,6 +708,17 @@ a.plain{color:var(--blue)}
 .barra{height:4px;background:var(--grid);border-radius:2px;overflow:hidden;
  width:120px;display:inline-block;vertical-align:middle;margin-left:6px}
 .barra i{display:block;height:100%;background:var(--blue);width:0}
+.stock-gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+ gap:10px}
+.stock-gal a{display:block;background:var(--surface);border:1px solid var(--border);
+ border-radius:8px;overflow:hidden;text-decoration:none;color:var(--ink2)}
+.stock-gal a.activa{border-color:#d0453e}
+.stock-gal img{width:100%;display:block;background:#111}
+.stock-gal .cap{padding:6px 10px;font-size:12px;line-height:1.4}
+.stock-gal .cap b{color:var(--ink);font-weight:600}
+.badge.agotado{background:rgba(208,69,62,.15);color:#e0645d;
+ border:1px solid rgba(208,69,62,.5)}
+.lleva{font-variant-numeric:tabular-nums;color:var(--ink)}
 </style></head><body>
 <header>
  <h1>📊 Analitica de Visitantes</h1>
@@ -723,6 +734,16 @@ a.plain{color:var(--blue)}
 
 <div class="card section"><h2>Mapa de calor por camara</h2>
  <div class="heat" id="heatmaps"></div></div>
+
+<div class="card section"><h2>Stock — posible agotado
+  <span id="stock-count" style="color:var(--muted);font-weight:400"></span></h2>
+ <div id="stock-bajadas" style="font-size:12px;color:var(--ink2);margin-bottom:10px"></div>
+ <div class="stock-gal" id="stock-activas"></div>
+ <div class="empty" id="stock-sin-activas">Ninguna alerta activa ahora.</div>
+ <h2 style="margin-top:14px">Historial</h2>
+ <div class="stock-gal" id="stock-historial"></div>
+ <div class="empty" id="stock-sin-historial" hidden>Sin alertas registradas.</div>
+</div>
 
 <div class="card section"><h2>Personas reconocidas (Re-ID)</h2>
  <div class="scroll-x"><table id="tabla-personas">
@@ -978,7 +999,46 @@ $btn.addEventListener('click',async()=>{
  }catch(e){console.error(e)}
  estadoAnalisis();
 });
-function tick(){refreshSummary();refreshPersons();refreshCaptures()}
+// Stock (9-oct-2026): alertas activas con su contador y el historial.
+// El contador avanza cada segundo en el navegador a partir de lo que dijo
+// el servidor en la ultima consulta (cada 5 s), sin pedirle mas.
+let stockVisto=0;
+function stockTarjeta(h){
+ const img=`/dashboard/img/stock/${encodeURIComponent(h.camara)}/${h.archivo}`;
+ const estado=h.activa
+  ?`<span class="badge agotado">ACTIVA</span> · lleva <span class="lleva"
+     data-lleva="${h.lleva_s}">${fmtDur(h.lleva_s)}</span>`
+  :`<span style="color:var(--muted)">hace ${fmtDur(h.lleva_s)}</span>`;
+ const tipo=h.tipo==='cerca'
+  ?`Cerca de vaciarse${h.bajadas?` (${h.bajadas} bajadas)`:''}`:'Posible agotado';
+ return `<a href="${img}" target="_blank" class="${h.activa?'activa':''}"
+   title="Abrir foto: antes | ahora | quien cogio">
+  <img loading="lazy" src="${img}">
+  <div class="cap">${tipo}<br><b>${h.producto}</b> · ${h.area}<br>
+   ${h.fecha} ${h.hora} · ${estado}
+   ${h.cambio!=null?` · cambio ${h.cambio}`:''}</div></a>`}
+async function refreshStock(){
+ try{
+  const r=await fetch('/dashboard/api/stock');const d=await r.json();
+  if(d.status!=='ok')return;
+  stockVisto=Date.now()/1000;
+  $('#stock-count').textContent=` — ${d.activas.length} activa(s), ${d.total} en total`;
+  $('#stock-bajadas').innerHTML=(d.bajadas&&d.bajadas.length)
+   ?'Bajadas desde la última foto de balda surtida: '+d.bajadas.map(b=>
+     `<b>${b.producto}</b> ${b.bajadas}`).join(' · '):'';
+  $('#stock-activas').innerHTML=d.activas.map(stockTarjeta).join('');
+  $('#stock-sin-activas').hidden=d.activas.length>0;
+  const pasadas=d.historial.filter(h=>!h.activa);
+  $('#stock-historial').innerHTML=pasadas.map(stockTarjeta).join('');
+  $('#stock-sin-historial').hidden=pasadas.length>0;
+ }catch(e){console.error(e)}
+}
+setInterval(()=>{
+ const extra=Date.now()/1000-stockVisto;
+ document.querySelectorAll('.lleva').forEach(el=>{
+  el.textContent=fmtDur(Number(el.dataset.lleva)+extra)});
+},1000);
+function tick(){refreshSummary();refreshPersons();refreshCaptures();refreshStock()}
 tick();refreshHeatmaps();estadoAnalisis();estadoVlm();
 setInterval(tick,5000);setInterval(refreshHeatmaps,10000);
 </script>

@@ -222,7 +222,11 @@ _DEFECTOS: Dict[str, Any] = {
     # Interruptor (6-oct-2026): para la A/B de fps con y sin stock. Apagado,
     # no se vigila ni se arma nada tras un agarre.
     'stock_activo': True,
-    'stock_umbral': 0.45,
+    # 9-oct-2026: 0,45 -> 0,80 -> 0,90 a petición del usuario, tras ver las
+    # fotos de las alertas en vivo: con 0,70-0,84 se había cogido un
+    # producto, pero la balda no estaba casi vacía (0,45 pasa a ser el
+    # umbral de BAJADA, abajo).
+    'stock_umbral': 0.90,
     # Mediciones seguidas por encima (alerta) o por debajo (sigue surtido).
     'stock_confirmaciones': 3,
     # Tras el agarre, cuánto esperar antes de mirar (la mano aún sale).
@@ -236,6 +240,19 @@ _DEFECTOS: Dict[str, Any] = {
     'stock_repuesto_frac': 0.6,
     # La petición de foto de referencia caduca si siguen tapando el producto.
     'stock_peticion_max_s': 120.0,
+    # Control de bajadas (9-oct-2026, lo pidió el usuario): tras un agarre,
+    # un cambio >= este umbral (y < stock_umbral) confirmado
+    # stock_confirmaciones veces es una BAJADA: se cuenta y se rehace la
+    # foto de ese producto. SIN CALIBRAR: tras los agarres del 7-8 oct el
+    # cambio medido estuvo entre 0,13 y 0,34 sin saber si faltaba algo. El
+    # usuario lo fijó en 0,45 el 9-oct viendo las fotos («vamos probando»).
+    'stock_umbral_bajada': 0.45,
+    # Cada tantas bajadas desde la última foto de balda surtida, aviso
+    # «cerca de vaciarse». 0 = sin aviso.
+    'stock_bajadas_aviso': 8,
+    # Foto de referencia automática de TODOS los productos, una vez al día
+    # desde esta hora ('HH:MM', hora del servidor). '' = apagada.
+    'stock_reinicio_diario': '07:30',
 }
 
 
@@ -1752,12 +1769,16 @@ class Anaqueles(TiendasProcess):
         for a in self._medidor.drenar_alertas_stock():
             agarre = (f" Último agarre: {a['hora_agarre']}."
                       if a.get('hora_agarre') else '')
+            cerca = a.get('tipo') == 'cerca'
+            detalle = (f"{a.get('bajadas', 0)} bajadas desde la última foto "
+                       f"de balda surtida" if cerca
+                       else f"cambio {a['cambio']:.2f}")
             alerta = {
-                'event_type': 'Posible agotado',
+                'event_type': 'Cerca de vaciarse' if cerca else 'Posible agotado',
                 'class_name': str(a['producto']),
                 'description': (f"{a['producto']} en {a['area_nombre']} "
                                 f"({camara}): detectado a las {a['hora']} "
-                                f"(cambio {a['cambio']:.2f}).{agarre}"),
+                                f"({detalle}).{agarre}"),
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'camera_name': camara,
                 'crop_image': a['imagen_b64'],
@@ -1765,7 +1786,8 @@ class Anaqueles(TiendasProcess):
                 'screenshot_path': a['ruta'],
                 'clase_gruesa': 'stock',
                 'dedup_clave': (f"stock|{camara}|{a['area']}|"
-                                f"{a['producto_idx']}|{a['hora']}"),
+                                f"{a['producto_idx']}|{a['hora']}|"
+                                f"{a.get('tipo', 'agotado')}"),
             }
             if not hasattr(self, '_alertas_pendientes'):
                 self._alertas_pendientes = []

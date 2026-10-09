@@ -211,6 +211,10 @@ app.add_middleware(
 # usa imports perezosos de este modulo para evitar el ciclo.
 from .dashboard import router as dashboard_router  # noqa: E402
 app.include_router(dashboard_router)
+# Apartado «Stock» del dashboard (9-oct-2026): alertas de «posible agotado»
+# activas y su historial con foto (`dashboard_stock.py`).
+from .dashboard_stock import router as dashboard_stock_router  # noqa: E402
+app.include_router(dashboard_stock_router)
 
 # API REST de LECTURA (HITO 8). Es la puerta por la que los dashboards leeran
 # cuando dejen de vivir dentro de este proceso (HITO 9). Solo GET: lo que

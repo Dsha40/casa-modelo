@@ -265,19 +265,25 @@ def heatmap_imagen(camera_id: str, area_idx: int,
 # pipeline VIVO (la petición la atiende el próximo frame de esa cámara). El
 # cruce entre hilos va por el candado de `anaqueles_stock`.
 @router.post('/{camera_id}/stock/referencia')
-def stock_referencia(camera_id: str) -> Dict[str, Any]:
-    """Pide la foto «surtido» de todos los productos de la cámara. Se toma
-    en cuanto nadie tape cada producto (como mucho, `stock_peticion_max_s`)."""
+def stock_referencia(camera_id: str, area: Optional[int] = None,
+                     producto: Optional[int] = None) -> Dict[str, Any]:
+    """Pide la foto «surtido»: de todos los productos de la cámara o, con
+    `?area=<i>&producto=<j>` (posición dentro del área), solo de uno
+    (9-oct-2026). Se toma en cuanto nadie lo tape (como mucho,
+    `stock_peticion_max_s`). Pone a cero la cuenta de bajadas."""
     from ..analityc.core import anaqueles_stock
-    if not anaqueles_stock.pedir_referencia(camera_id):
+    if not anaqueles_stock.pedir_referencia(camera_id, area, producto):
         raise HTTPException(
             status_code=404,
             detail=f'la cámara {camera_id!r} no está midiendo en modo '
                    f'Anaqueles ahora mismo. Vigiladas: '
                    f'{anaqueles_stock.camaras_vigiladas() or "ninguna"}')
+    uno = area is not None and producto is not None
     return {'status': 'ok', 'camera_id': camera_id,
-            'mensaje': 'Foto pedida: se toma de cada producto en cuanto '
-                       'nadie lo tape.'}
+            'mensaje': ('Foto pedida de ese producto: se toma en cuanto '
+                        'nadie lo tape.' if uno else
+                        'Foto pedida: se toma de cada producto en cuanto '
+                        'nadie lo tape.')}
 
 
 @router.get('/{camera_id}/stock')

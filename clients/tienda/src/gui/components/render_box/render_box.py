@@ -1142,14 +1142,32 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         # «Posible agotado» (5-oct-2026, servidor `anaqueles_stock.py`): la
         # foto de referencia la pide el operador con la balda BIEN SURTIDA;
         # el servidor no la renueva sola.
+        # 9-oct-2026: también por producto (p. ej. tras reponer solo uno).
+        # El servidor la toma sola cada día a las 7:30 y la rehace tras cada
+        # bajada confirmada; esta es la manual, con la balda bien surtida.
         menu.addSeparator()
-        foto = menu.addAction("📷 Foto de referencia de stock (balda surtida)",
-                              lambda *_: self._foto_referencia_stock())
+        foto = menu.addMenu("📷 Foto de referencia de stock (balda surtida)")
+        foto.setStyleSheet(self._MENU_QSS)
         foto.setEnabled(bool(productos.productos))
+        foto.addAction("Todos los productos",
+                       lambda *_: self._foto_referencia_stock())
+        for i, area in enumerate(self._nombres_anaqueles_todas()):
+            suyos = productos.de_anaquel(i)
+            if not suyos:
+                continue
+            sub = foto.addMenu(area)
+            sub.setStyleSheet(self._MENU_QSS)
+            # La posición DENTRO del área es la identidad del producto en
+            # el servidor (`productos_anaquel.py`).
+            for posicion, j in enumerate(suyos):
+                sub.addAction(productos.nombre_visible(j),
+                              lambda *_, i=i, p=posicion:
+                              self._foto_referencia_stock(i, p))
 
-    def _foto_referencia_stock(self):
+    def _foto_referencia_stock(self, area=None, producto=None):
         """Pide al servidor la foto «surtido» de todos los productos de esta
-        camara. Va por HTTP y no por el websocket: el payload lo comparten
+        camara, o solo del producto `producto` (posicion dentro del area
+        `area`). Va por HTTP y no por el websocket: el payload lo comparten
         otros clientes (GUIA 4.7) y esto es una orden suelta, no un dato de
         cada frame."""
         from urllib.parse import quote
@@ -1157,6 +1175,8 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             url = (f"{self._http_base()}/api/anaqueles/"
                    f"{quote(str(self._device_id()), safe='')}"
                    "/stock/referencia")
+            if area is not None and producto is not None:
+                url += f"?area={int(area)}&producto={int(producto)}"
         except Exception as e:
             QMessageBox.warning(self, "Stock", f"Sin servidor: {e}")
             return
@@ -1170,9 +1190,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             QMessageBox.information(
                 self, "Stock",
                 f"{data.get('mensaje', 'Foto pedida.')}\n\n"
-                "Hazla con la balda bien surtida. Tras cada agarre, el "
-                "servidor compara el producto con esta foto y avisa en el "
-                "panel de Anaqueles si parece agotado.")
+                "Hazla con la balda bien surtida: pone a cero la cuenta de "
+                "bajadas. Tras cada agarre, el servidor compara el producto "
+                "con su foto: si falta algo lo cuenta y rehace la foto, y "
+                "cada 8 bajadas avisa de que está cerca de vaciarse.")
         else:
             QMessageBox.warning(
                 self, "Stock",

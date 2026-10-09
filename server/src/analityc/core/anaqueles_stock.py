@@ -80,12 +80,21 @@ _CAMPOS_ALERTA = ('area', 'producto_idx', 'area_nombre', 'producto',
 # Solo se cruzan dos cosas, siempre bajo el candado: la PETICIÓN de foto y una
 # COPIA del estado para consultarlo.
 _candado = threading.Lock()
-_peticiones: Dict[str, float] = {}
+#: cámara -> claves pedidas, o None = TODOS los productos.
+_peticiones: Dict[str, Optional[set]] = {}
 _estados: Dict[str, Dict[str, Any]] = {}
 
+#: Para qué se toma una foto de referencia (9-oct-2026). «manual» y «diaria»
+#: son la balda SURTIDA: ponen a cero la cuenta de bajadas y cierran sus
+#: alertas. «bajada» es la foto que se rehace tras una bajada confirmada,
+#: para medir la siguiente desde ahí: conserva la cuenta.
+MOTIVOS_SURTIDO = ('manual', 'diaria')
 
-def pedir_referencia(camera_id: str) -> bool:
-    """Pide la foto «surtido» de todos los productos de la cámara.
+
+def pedir_referencia(camera_id: str, area: Optional[int] = None,
+                     producto: Optional[int] = None) -> bool:
+    """Pide la foto «surtido»: de TODOS los productos de la cámara, o solo
+    del producto `producto` (posición dentro del área) del área `area`.
 
     False si esa cámara no está midiendo en modo Anaqueles ahora mismo (no
     habría quién atendiera la petición).
@@ -94,7 +103,14 @@ def pedir_referencia(camera_id: str) -> bool:
     with _candado:
         if cam not in _estados:
             return False
-        _peticiones[cam] = time.time()
+        if area is None or producto is None:
+            _peticiones[cam] = None                 # todos
+        elif cam not in _peticiones:
+            _peticiones[cam] = {(int(area), int(producto))}
+        else:
+            pedidas = _peticiones[cam]
+            if pedidas is not None:                 # si ya eran todos, sigue
+                pedidas.add((int(area), int(producto)))
         return True
 
 
@@ -110,9 +126,13 @@ def camaras_vigiladas() -> List[str]:
         return sorted(_estados)
 
 
-def _tomar_peticion(camera_id: str) -> Optional[float]:
+_SIN_PETICION = object()
+
+
+def _tomar_peticion(camera_id: str):
+    """None = todos; un conjunto = esos productos; `_SIN_PETICION` = nada."""
     with _candado:
-        return _peticiones.pop(str(camera_id), None)
+        return _peticiones.pop(str(camera_id), _SIN_PETICION)
 
 
 # ── Imagen ──────────────────────────────────────────────────────────────────
@@ -209,7 +229,8 @@ _ALTO_EVIDENCIA = 240
 
 def componer_evidencia(antes: np.ndarray, ahora: np.ndarray,
                        persona: Optional[np.ndarray],
-                       nombre: str) -> np.ndarray:
+                       nombre: str,
+                       titulo: str = 'Posible agotado') -> np.ndarray:
     """ANTES | AHORA | PERSONA, al mismo alto y con su rótulo.
 
     El recuadro de un producto mide unas decenas de píxeles: se AMPLÍA para
@@ -235,7 +256,7 @@ def componer_evidencia(antes: np.ndarray, ahora: np.ndarray,
     # de los mapas de calor, CLAUDE.md sección 6).
     texto = nombre.encode('ascii', 'replace').decode('ascii')
     pie = np.full((30, salida.shape[1], 3), 30, dtype=np.uint8)
-    cv2.putText(pie, f'Posible agotado: {texto}', (6, 21),
+    cv2.putText(pie, f'{titulo}: {texto}', (6, 21),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (80, 80, 255), 1, cv2.LINE_AA)
     return np.vstack([salida, pie])
 
@@ -336,6 +357,14 @@ class VigilanteStock:
         self._alertas_salida: List[Dict[str, Any]] = []
         #: Hora del último frame: con ella sale «lleva X» de cada alerta.
         self._t = 0.0
+        #: clave -> bajadas confirmadas desde la última foto de balda
+        #: SURTIDA (manual o diaria). Se guarda con la referencia en disco.
+        self._bajadas: Dict[Clave, int] = {}
+        #: clave -> aviso «cerca de vaciarse» abierto (se cierra con la
+        #: siguiente foto de balda surtida).
+        self._cerca: Dict[Clave, Dict[str, Any]] = {}
+        #: Día ('AAAA-MM-DD') de la última foto diaria automática.
+        self._dia_diaria = self._leer_dia_diaria()
         self.cambio = True        # hay algo nuevo que emitir al cliente
         self._publicar()
 
@@ -351,7 +380,8 @@ class VigilanteStock:
             if clave[0] != int(area) or clave in self._alertas:
                 continue
             self._pendientes[clave] = {'desde': float(t), 'racha_alta': 0,
-                                       'racha_baja': 0, 'ultima': -1e12}
+                                       'racha_bajada': 0, 'racha_baja': 0,
+                                       'ultima': -1e12}
         self.cambio = True
 
     def vigilar(self, frame: np.ndarray,
@@ -395,6 +425,13 @@ class VigilanteStock:
             'alertas': [dict({k: a[k] for k in _CAMPOS_ALERTA},
                              vacio_s=max(0, int(self._t - a['desde_t'])))
                         for _c, a in sorted(self._alertas.items())],
+            # 9-oct-2026: «cerca de vaciarse» y la cuenta de bajadas.
+            'cerca': [dict({k: a[k] for k in _CAMPOS_ALERTA},
+                           bajadas=a['bajadas'],
+                           vacio_s=max(0, int(self._t - a['desde_t'])))
+                      for _c, a in sorted(self._cerca.items())],
+            'bajadas': [{'area': c[0], 'producto_idx': c[1], 'bajadas': n}
+                        for c, n in sorted(self._bajadas.items()) if n],
         }
 
     # ── Interno ─────────────────────────────────────────────────────────
@@ -409,11 +446,17 @@ class VigilanteStock:
         for clave in vivos:
             self._cargar_de_disco(clave, vivos[clave][1], forma)
 
-        if _tomar_peticion(self.camera_id) is not None:
-            self._peticion = {'desde': t, 'faltan': set(vivos)}
-            self.cambio = True
+        pedidas = _tomar_peticion(self.camera_id)
+        if pedidas is not _SIN_PETICION:
+            claves = set(vivos) if pedidas is None else set(pedidas) & set(vivos)
+            self._pedir_fotos(claves, 'manual', t)
             logger.info("stock[%s]: pedida la foto de referencia de %d "
-                        "productos", self.camera_id, len(vivos))
+                        "producto(s)", self.camera_id, len(claves))
+        if self._toca_diaria(t):
+            self._pedir_fotos(set(vivos), 'diaria', t)
+            logger.info("stock[%s]: foto de referencia DIARIA (%s) de %d "
+                        "productos", self.camera_id,
+                        self.cfg.get('stock_reinicio_diario'), len(vivos))
         if self._peticion is not None:
             self._atender_peticion(frame, vivos, nombres_area, cuerpos,
                                    forma, t)
@@ -477,6 +520,7 @@ class VigilanteStock:
                                  'caja': caja, 'firma': meta['firma'],
                                  'nombre': meta.get('nombre'),
                                  'ts': float(meta.get('ts') or 0)}
+            self._bajadas[clave] = int(meta.get('bajadas') or 0)
             self.cambio = True
             logger.info("stock[%s]: referencia de %s cargada del disco",
                         self.camera_id, meta.get('nombre') or clave)
@@ -489,14 +533,14 @@ class VigilanteStock:
         pet = self._peticion
         if pet is None:
             return
-        for clave in list(pet['faltan']):
+        for clave, motivo in list(pet['faltan'].items()):
             if clave not in vivos:
-                pet['faltan'].discard(clave)
+                pet['faltan'].pop(clave, None)
                 continue
             nombre, poligono = vivos[clave]
             caja = _caja(poligono, forma)
             if caja is None:
-                pet['faltan'].discard(clave)
+                pet['faltan'].pop(clave, None)
                 logger.warning("stock[%s]: %s es demasiado pequeño para "
                                "compararlo", self.camera_id, nombre)
                 continue
@@ -508,18 +552,26 @@ class VigilanteStock:
                    'caja': caja, 'firma': _firma_poligono(poligono, forma),
                    'nombre': nombre, 'ts': t}
             self._refs[clave] = ref
-            # Con la foto nueva, lo que se vigilaba o avisaba ya no aplica.
+            # Con la foto nueva, lo que se vigilaba ya no aplica.
             self._pendientes.pop(clave, None)
-            vieja = self._alertas.pop(clave, None)
-            if vieja is not None:
-                self._suceso('repuesto', clave, nombre, nombres_area, t,
-                             duracion_s=int(t - vieja['desde_t']))
+            if motivo in MOTIVOS_SURTIDO:
+                # Balda SURTIDA: cuenta de bajadas a cero y sus avisos fuera.
+                self._bajadas[clave] = 0
+                vieja = self._alertas.pop(clave, None)
+                cerca = self._cerca.pop(clave, None)
+                abierta = vieja if vieja is not None else cerca
+                if abierta is not None:
+                    desde = abierta['desde_t']
+                    self._suceso('repuesto', clave, nombre, nombres_area, t,
+                                 duracion_s=int(t - desde))
             self._guardar(clave, ref)
-            pet['faltan'].discard(clave)
+            pet['faltan'].pop(clave, None)
             self.cambio = True
-            logger.info("stock[%s]: referencia tomada de %s (%s)",
+            logger.info("stock[%s]: referencia tomada de %s (%s, %s; %d "
+                        "bajada(s) desde la balda surtida)",
                         self.camera_id, nombre,
-                        nombres_area.get(clave[0], f'Área {clave[0] + 1}'))
+                        nombres_area.get(clave[0], f'Área {clave[0] + 1}'),
+                        motivo, self._bajadas.get(clave, 0))
         caduca = float(self.cfg.get('stock_peticion_max_s', 120.0))
         if not pet['faltan'] or (t - pet['desde']) > caduca:
             if pet['faltan']:
@@ -541,10 +593,54 @@ class VigilanteStock:
             os.replace(tmp, base.with_suffix('.png'))
             base.with_suffix('.json').write_text(json.dumps(
                 {'firma': ref['firma'], 'nombre': ref['nombre'],
-                 'ts': ref['ts']}, ensure_ascii=False), encoding='utf-8')
+                 'ts': ref['ts'], 'bajadas': self._bajadas.get(clave, 0)},
+                ensure_ascii=False), encoding='utf-8')
         except Exception as exc:                            # noqa: BLE001
             logger.warning("stock[%s]: no se pudo guardar la referencia "
                            "%s: %s", self.camera_id, clave, exc)
+
+    # ── Fotos de referencia: manual, diaria y tras una bajada (9-oct) ───
+    def _pedir_fotos(self, claves, motivo: str, t: float) -> None:
+        """Añade `claves` a la petición en curso. Una foto de balda surtida
+        manda sobre una «bajada» pendiente del mismo producto."""
+        if not claves:
+            return
+        if self._peticion is None:
+            self._peticion = {'desde': t, 'faltan': {}}
+        faltan = self._peticion['faltan']
+        for clave in claves:
+            if faltan.get(clave) not in MOTIVOS_SURTIDO:
+                faltan[clave] = motivo
+        self._peticion['desde'] = t       # el plazo cuenta desde la última
+        self.cambio = True
+
+    def _ruta_diaria(self) -> Path:
+        return self._carpeta / 'ultima_diaria.txt'
+
+    def _leer_dia_diaria(self) -> str:
+        try:
+            return self._ruta_diaria().read_text(encoding='utf-8').strip()
+        except Exception:                                   # noqa: BLE001
+            return ''
+
+    def _toca_diaria(self, t: float) -> bool:
+        """True UNA vez al día, en el primer frame desde la hora
+        `stock_reinicio_diario` ('HH:MM'; vacío = apagado). El día queda en
+        disco: un reinicio del servidor no la repite."""
+        hora = str(self.cfg.get('stock_reinicio_diario') or '').strip()
+        if not hora:
+            return False
+        dia = time.strftime('%Y-%m-%d', time.localtime(t))
+        if self._dia_diaria == dia or time.strftime('%H:%M', time.localtime(t)) < hora:
+            return False
+        self._dia_diaria = dia
+        try:
+            self._carpeta.mkdir(parents=True, exist_ok=True)
+            self._ruta_diaria().write_text(dia, encoding='utf-8')
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("stock[%s]: no se pudo apuntar la foto diaria: %s",
+                           self.camera_id, exc)
+        return True
 
     def _cambio_de(self, clave: Clave, frame, cuerpos) -> Optional[float]:
         """Cambio actual frente a la referencia; None si está tapado."""
@@ -555,7 +651,8 @@ class VigilanteStock:
         return diferencia(ref['img'], frame[y1:y2, x1:x2], ref['mascara'])
 
     def _emitir_alerta(self, clave: Clave, frame, nombre: str,
-                       area_nombre: str, cambio: float, t: float) -> None:
+                       area_nombre: str, cambio: float, t: float,
+                       tipo: str = 'agotado', bajadas: int = 0) -> None:
         """La alerta para el panel: su foto es el ANTES y el AHORA del
         producto (5-oct, a petición del usuario; antes era la persona); en
         disco queda además la evidencia antes | ahora | quién agarró, que
@@ -567,8 +664,9 @@ class VigilanteStock:
             persona = self._ultima_persona.get(clave[0])
             img_persona = persona['img'] if persona else None
             ruta = self._guardar_evidencia(clave, ref['img'], ahora,
-                                           img_persona, nombre, t)
+                                           img_persona, nombre, t, tipo=tipo)
             self._alertas_salida.append({
+                'tipo': tipo, 'bajadas': bajadas,
                 'area': clave[0], 'producto_idx': clave[1],
                 'area_nombre': area_nombre, 'producto': nombre,
                 'cambio': round(cambio, 3), 'hora': _hora(t),
@@ -580,17 +678,20 @@ class VigilanteStock:
                          "%s", self.camera_id, nombre, exc)
 
     def _guardar_evidencia(self, clave: Clave, antes, ahora, persona,
-                           nombre: str, t: float) -> Optional[Path]:
+                           nombre: str, t: float,
+                           tipo: str = 'agotado') -> Optional[Path]:
         """`stock_alertas/<fecha>_<hora>_<área>_<producto>.jpg` junto a las
-        referencias. Son fotos de clientes: viven en `output/`, fuera de
-        git, como las fichas de las personas."""
+        referencias (`..._cerca.jpg` para «cerca de vaciarse»). Son fotos de
+        clientes: viven en `output/`, fuera de git, como las fichas."""
         try:
             carpeta = self._carpeta.parent / 'stock_alertas'
             carpeta.mkdir(parents=True, exist_ok=True)
+            sufijo = '_cerca' if tipo == 'cerca' else ''
             ruta = carpeta / (time.strftime('%Y-%m-%d_%H%M%S',
                                             time.localtime(t))
-                              + f'_{clave[0]}_{clave[1]}.jpg')
-            img = componer_evidencia(antes, ahora, persona, nombre)
+                              + f'_{clave[0]}_{clave[1]}{sufijo}.jpg')
+            titulo = 'Cerca de vaciarse' if tipo == 'cerca' else 'Posible agotado'
+            img = componer_evidencia(antes, ahora, persona, nombre, titulo)
             ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 88])
             if not ok:
                 return None
@@ -618,19 +719,28 @@ class VigilanteStock:
             return
         p['ultima'] = t
         umbral = float(self.cfg.get('stock_umbral', 0.45))
+        umbral_bajada = float(self.cfg.get('stock_umbral_bajada', 0.25))
         n = int(self.cfg.get('stock_confirmaciones', 3))
-        if cambio >= umbral:
-            p['racha_alta'] += 1
+        # Tres rachas (9-oct-2026): «alta» (>= umbral: posible agotado),
+        # «bajada» (>= umbral_bajada: falta algo, se cuenta) y «baja» (por
+        # debajo: sigue igual). Una medida alta también cuenta como bajada.
+        p['racha_alta'] = p['racha_alta'] + 1 if cambio >= umbral else 0
+        if cambio >= umbral_bajada:
+            p['racha_bajada'] = p.get('racha_bajada', 0) + 1
             p['racha_baja'] = 0
         else:
             p['racha_baja'] += 1
-            p['racha_alta'] = 0
+            p['racha_bajada'] = 0
         nombre = vivos.get(clave, (self._refs[clave]['nombre'], None))[0]
-        logger.info("STOCK [%s] %s / %s: cambio=%.3f (umbral %.2f) "
-                    "alto %d/%d bajo %d/%d", self.camera_id,
+        logger.info("STOCK [%s] %s / %s: cambio=%.3f (agotado %.2f, bajada "
+                    "%.2f) alto %d/%d bajada %d/%d igual %d/%d", self.camera_id,
                     nombres_area.get(clave[0], f'Área {clave[0] + 1}'),
-                    nombre, cambio, umbral, p['racha_alta'], n,
-                    p['racha_baja'], n)
+                    nombre, cambio, umbral, umbral_bajada, p['racha_alta'], n,
+                    p.get('racha_bajada', 0), n, p['racha_baja'], n)
+        if p['racha_alta'] < n and p.get('racha_bajada', 0) >= n:
+            self._confirmar_bajada(clave, frame, nombre, nombres_area,
+                                   cambio, t)
+            return
         if p['racha_alta'] >= n:
             self._pendientes.pop(clave, None)
             self._alertas[clave] = {
@@ -649,6 +759,52 @@ class VigilanteStock:
         elif p['racha_baja'] >= n:
             self._pendientes.pop(clave, None)      # sigue surtido
             self.cambio = True
+
+    def _confirmar_bajada(self, clave, frame, nombre, nombres_area,
+                          cambio, t) -> None:
+        """Bajada confirmada tras un agarre (9-oct-2026): se cuenta, se pide
+        de nuevo la foto de ESE producto (la próxima bajada se mide desde
+        aquí) y, cada `stock_bajadas_aviso` bajadas, aviso «cerca de
+        vaciarse». La cuenta vuelve a cero con la foto de balda surtida."""
+        self._pendientes.pop(clave, None)
+        n = self._bajadas.get(clave, 0) + 1
+        self._bajadas[clave] = n
+        self._guardar_cuenta(clave)
+        area_nombre = nombres_area.get(clave[0], f'Área {clave[0] + 1}')
+        self._suceso('bajada', clave, nombre, nombres_area, t, bajadas=n)
+        logger.info("stock[%s]: BAJADA %d de %s en %s (cambio %.3f); se "
+                    "rehace su foto", self.camera_id, n, nombre, area_nombre,
+                    cambio)
+        cada = int(self.cfg.get('stock_bajadas_aviso', 8))
+        if cada > 0 and n % cada == 0:
+            self._cerca[clave] = {
+                'area': clave[0], 'producto_idx': clave[1],
+                'area_nombre': area_nombre, 'producto': nombre,
+                'desde': _hora(t), 'desde_t': t, 'cambio': round(cambio, 3),
+                'bajadas': n}
+            self._suceso('cerca_vaciarse', clave, nombre, nombres_area, t,
+                         bajadas=n)
+            self._emitir_alerta(clave, frame, nombre, area_nombre, cambio, t,
+                                tipo='cerca', bajadas=n)
+            logger.warning("stock[%s]: CERCA DE VACIARSE %s en %s (%d bajadas "
+                           "desde la balda surtida)", self.camera_id, nombre,
+                           area_nombre, n)
+        # La evidencia de arriba usa la foto VIEJA: la nueva, después.
+        self._pedir_fotos({clave}, 'bajada', t)
+        self.cambio = True
+
+    def _guardar_cuenta(self, clave: Clave) -> None:
+        """Apunta la cuenta de bajadas en el .json de la referencia, para
+        que sobreviva a un reinicio aunque la foto nueva aún no esté."""
+        try:
+            ruta = self._carpeta / f'{clave[0]}_{clave[1]}.json'
+            if ruta.exists():
+                meta = json.loads(ruta.read_text(encoding='utf-8'))
+                meta['bajadas'] = self._bajadas.get(clave, 0)
+                ruta.write_text(json.dumps(meta, ensure_ascii=False), encoding='utf-8')
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("stock[%s]: no se pudo guardar la cuenta de %s: %s",
+                           self.camera_id, clave, exc)
 
     def _medir_alerta(self, clave, frame, vivos, nombres_area,
                       cuerpos, t) -> None:
