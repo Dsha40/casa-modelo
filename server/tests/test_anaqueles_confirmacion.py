@@ -131,6 +131,17 @@ def test_sin_bajada_queda_sin_confirmar(tmp_path):
     assert m._agarres_por_confirmar == []
 
 
+def test_los_sin_confirmar_se_guardan_en_el_archivo_del_dia(tmp_path):
+    """«Guardarlo aparte»: hasta el 13-oct-2026 solo vivía en memoria y un
+    reinicio lo borraba. Ahora va al archivo del día y se reanuda."""
+    m = _medidor(tmp_path, [ABAJO] * 4 + [ARRIBA] * 6, vigilando=False)
+    _correr(m, BOX_DEBAJO, 14)
+    m.registro.volcar(force=True)
+    otro = RegistroAnaqueles('cam', raiz=tmp_path)            # tras un reinicio
+    assert otro.area(0)['agarres_sin_confirmar'] == 1
+    assert int(otro.area(0).get('agarres') or 0) == 0
+
+
 def test_una_bajada_sin_gesto_no_inventa_un_agarre(tmp_path):
     m = _medidor(tmp_path, [ABAJO])
     m._sucesos_falsos.append(_bajada())

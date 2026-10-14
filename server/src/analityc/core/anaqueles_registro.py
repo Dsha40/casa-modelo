@@ -311,6 +311,11 @@ class RegistroAnaqueles:
                             for k, p in (a.get('productos') or {}).items()},
                         'agarres_sin_producto': int(
                             a.get('agarres_sin_producto') or 0),
+                        # Gestos sin una bajada que los confirme (12-oct-2026,
+                        # «guardarlo aparte»). Hasta el 13-oct solo vivían en
+                        # memoria: un reinicio los borraba.
+                        'agarres_sin_confirmar': int(
+                            a.get('agarres_sin_confirmar') or 0),
                     }
                     for clave, a in self.areas.items()
                 },
@@ -365,6 +370,8 @@ class RegistroAnaqueles:
                         for k, p in (a.get('productos') or {}).items()},
                     'agarres_sin_producto': int(
                         a.get('agarres_sin_producto') or 0),
+                    'agarres_sin_confirmar': int(
+                        a.get('agarres_sin_confirmar') or 0),
                 }
             if self.areas:
                 logger.info(
