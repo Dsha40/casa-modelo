@@ -165,3 +165,7 @@ server/logs_*/
 # Informes y mapas de calor que se generan para el cliente final: llevan
 # fotos de la tienda con clientes y solo viven en el equipo donde se hacen.
 informes/
+
+# ===== Traspaso de las sesiones de Claude (13-oct-2026) =====
+# Lo pidio el usuario: CLAUDE.md se queda en cada equipo y no se sube.
+CLAUDE.md
