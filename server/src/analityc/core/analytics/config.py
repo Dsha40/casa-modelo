@@ -683,6 +683,11 @@ class AnalyticsConfig:
     DEMO_CLASIFICADOR: str = "b"
     # Cadencia con el clasificador B: 5 imágenes a 7,7 fps (~0,65 s).
     DEMO_RECLASSIFY_EVERY_B: int = 5
+    # Seguridad que exige el clasificador B para decidir (12-oct-2026): 90 %
+    # si alguna lectura tuvo CARA (en vivo acertaba el 97 %), 95 % si solo
+    # cuerpo (93 %). Antes, 95 % para todo. Ver `clasificador_b.py`.
+    DEMO_B_SEGURIDAD_CON_CARA: float = 0.90
+    DEMO_B_SEGURIDAD: float = 0.95
 
     # Taxonomia GRUESA de edad para resultados solo-corporales (age_source=body)
     # Forma: (min, max, etiqueta). El maximo del ultimo bin cubre 60+.

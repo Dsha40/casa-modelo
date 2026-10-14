@@ -73,3 +73,18 @@ def test_quien_ya_decidio_no_se_vuelve_a_mirar():
     # Si llamara al clasificador de siempre (histéresis), fallaría: no tiene
     # modelos. Debe devolver el resultado guardado sin mirar la imagen.
     assert c.classify(None, (0, 0, 10, 10), 7)['gender'] == 'Hombre'
+
+
+def _acc_fuente(lecturas, fuente):
+    a = cb._AcumuladorEvidencia(AnalyticsConfig)
+    for ph in lecturas:
+        a.add(np.array([ph, 1.0 - ph]), np.full(8, 1 / 8), 30.0, weight=1.0, source=fuente)
+    return a
+
+
+def test_con_cara_basta_el_90_y_solo_cuerpo_exige_el_95():
+    """12-oct-2026: con cara acertaba el 97 % en vivo y solo con cuerpo el
+    93 %. Dos lecturas de 0,92 (evidencia 2,44) pasan el 90 % (2,20) pero no
+    el 95 % (2,94)."""
+    assert _acc_fuente([0.92, 0.92], 'face').try_commit(5, 0.85, 0.35) is not None
+    assert _acc_fuente([0.92, 0.92], 'body').try_commit(5, 0.85, 0.35) is None

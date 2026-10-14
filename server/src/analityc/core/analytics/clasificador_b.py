@@ -24,6 +24,12 @@ Detalle en `informes/informe_2026-10-08_dia.md` (local) y en CLAUDE.md.
   * NO hereda el género del reconocimiento de caras (sigue reconociendo y
     registrando caras: la identidad no cambia);
   * NO vuelve a mirar a quien ya decidió (la «histéresis»): así se validó;
+  * 12-oct-2026: decide con el 90 % de seguridad si alguna lectura tuvo
+    CARA y con el 95 % si solo hubo cuerpo (`_AcumuladorEvidencia.umbral`).
+    En vivo (8-oct) con cara acertaba el 97 % y solo con cuerpo el 93 %
+    (mujeres de cuerpo, 88 %). En el banco, junto con conservar el género
+    9 s (`demografia_aplazada.py`): 69 % decididas frente a 59 %, acierto
+    93,0 % frente a 93,3 % (dentro del margen) y un 24 % menos de lecturas;
   * la cadencia (mirar cada ~0,6 s) la pone `tiendas.py` con
     `DEMO_RECLASSIFY_EVERY_B`.
 
@@ -84,17 +90,28 @@ class _ReidSinDemografia:
         return None
 
 
+def _log_odds(seguridad: float) -> float:
+    return math.log(seguridad / (1.0 - seguridad))
+
+
 class _AcumuladorEvidencia(dm._TrackAccumulator):
     """Decide cuando la evidencia sumada pasa el umbral: log-odds de cada
     lectura recortados a ±`tope` (una lectura no vale más que p≈0,95), por
     su peso, con un `descuento` porque lecturas seguidas se parecen; al
-    menos 2 lecturas y sin más de un 25 % de votos en contra."""
-    umbral = math.log(0.95 / 0.05)
+    menos 2 lecturas y sin más de un 25 % de votos en contra. El umbral
+    depende de si hubo cara (ver la cabecera del módulo)."""
     descuento = 0.5
     tope = 3.0
     min_lecturas = 2
     max_desacuerdo = 0.25
     __slots__ = ()
+
+    @property
+    def umbral(self) -> float:
+        cfg = dm.AnalyticsConfig
+        if self.n_face_samples > 0:
+            return _log_odds(float(getattr(cfg, 'DEMO_B_SEGURIDAD_CON_CARA', 0.90)))
+        return _log_odds(float(getattr(cfg, 'DEMO_B_SEGURIDAD', 0.95)))
 
     def evidencia(self) -> float:
         s = 0.0

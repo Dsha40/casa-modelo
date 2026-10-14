@@ -24,6 +24,7 @@ from ..config.config import (
 # en el espacio de siempre (0 = persona), asi que ByteTrack, PolygonZone,
 # demografia y heatmap siguen intactos aguas abajo.
 from . import deteccion_compartida
+from . import demografia_aplazada
 from . import filtro_fondo
 from . import zonas_ignorar
 from . import ritmo_imagenes
@@ -1476,6 +1477,17 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             except Exception:
                 pass
 
+        # La demografia NO se borra aqui (12-oct-2026,
+        # `demografia_aplazada.py`): ByteTrack recuerda el numero 9 s y quien
+        # vuelve antes conserva su genero. Se borra (y se sella la ficha)
+        # en `_purgar_demografia` cuando pasa ese tiempo sin volver.
+        if getattr(self, '_demographics', None) is not None:
+            demografia_aplazada.aplazar(self._demographics, track_id,
+                                        time.time())
+        else:
+            self._borrar_demografia(track_id)
+
+    def _borrar_demografia(self, track_id: int):
         # El track muere: si tenia una foto y nunca llego a tener genero,
         # se sella el JSON con el MOTIVO (Hito 7). Va ANTES de liberar el
         # estado, que es de donde sale el diagnostico.
@@ -1492,6 +1504,14 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 self._demographics.remove_track(track_id)
             except Exception:
                 pass
+
+    def _purgar_demografia(self):
+        """Borra la demografia de quien lleva `BYTETRACK_LOST_S` sin volver
+        (`demografia_aplazada.py`). Una vez por imagen de esta camara."""
+        demografia_aplazada.purgar(
+            getattr(self, '_demographics', None), time.time(),
+            float(getattr(AnalyticsConfig, 'BYTETRACK_LOST_S', 9.0) or 9.0),
+            self._borrar_demografia)
 
     def cleanup_stale_tracks(self):
         current_frame = self.frame_counter
@@ -1705,6 +1725,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         sincronizar nuestro dict active_tracks con esos IDs.
         """
         current_botsort_ids = set()
+        self._purgar_demografia()
 
         for det in detections:
             tid = det.get('track_id')
@@ -1752,7 +1773,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 if hasattr(self, '_people_counter'):
                     self._people_counter.register_track(tid)
             else:
-                # Nuevo track de BoTSORT: crear entrada
+                # Nuevo track de BoTSORT: crear entrada. Si es un numero que
+                # volvio antes de 9 s, conserva su genero (12-oct-2026).
+                demografia_aplazada.cancelar(
+                    getattr(self, '_demographics', None), tid)
                 center = det['center']
                 roi_polygon_points = self.roi_polygon.reshape((-1, 1, 2))
                 is_inside = self.is_inside_polygon(center, roi_polygon_points)
