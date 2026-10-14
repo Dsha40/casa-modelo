@@ -34,6 +34,10 @@ sys.path.insert(0, str(RAIZ / 'server'))
 
 from src.analityc.core.anaqueles import (  # noqa: E402
     MedidorAnaqueles, _DEFECTOS)
+# Estas pruebas fijan la MÁQUINA del gesto y la visita del cuerpo: desde
+# el 12-oct-2026 los defectos cuentan la visita con la muñeca y esperan
+# la bajada para contar el agarre (test_anaqueles_confirmacion.py).
+_REGLAS_DEL_GESTO = {'visita_por_muneca': False, 'agarre_requiere_bajada': False}
 from src.analityc.core.anaqueles_grabador import Grabador  # noqa: E402
 from src.analityc.core.anaqueles_registro import (  # noqa: E402
     RegistroAnaqueles)
@@ -84,7 +88,7 @@ def reloj(monkeypatch):
 
 
 def _medidor(tmp_path, guion, **cfg_extra):
-    cfg = dict(_DEFECTOS)
+    cfg = dict(_DEFECTOS, **_REGLAS_DEL_GESTO)
     cfg.update(cfg_extra)
     pose = PoseSecuencia(guion)
     m = MedidorAnaqueles('cam', cfg, pose=pose,

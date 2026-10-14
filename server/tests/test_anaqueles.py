@@ -40,6 +40,10 @@ sys.path.insert(0, str(RAIZ / 'server'))
 
 from src.analityc.core.anaqueles import (  # noqa: E402
     MODO, MedidorAnaqueles, _DEFECTOS)
+# Estas pruebas fijan la MÁQUINA del gesto y la visita del cuerpo: desde
+# el 12-oct-2026 los defectos cuentan la visita con la muñeca y esperan
+# la bajada para contar el agarre (test_anaqueles_confirmacion.py).
+_REGLAS_DEL_GESTO = {'visita_por_muneca': False, 'agarre_requiere_bajada': False}
 from src.analityc.core.anaqueles_registro import (  # noqa: E402
     RegistroAnaqueles)
 
@@ -87,7 +91,7 @@ class EscenaControlada:
 
 
 def _medidor(tmp_path, pose=None, escena=None, **cfg_extra):
-    cfg = dict(_DEFECTOS)
+    cfg = dict(_DEFECTOS, **_REGLAS_DEL_GESTO)
     cfg.update(cfg_extra)
     registro = RegistroAnaqueles('cam-test', raiz=tmp_path)
     m = MedidorAnaqueles('cam-test', cfg,

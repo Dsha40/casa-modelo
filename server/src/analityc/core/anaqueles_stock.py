@@ -379,6 +379,15 @@ class VigilanteStock:
         for clave in list(self._refs):
             if clave[0] != int(area) or clave in self._alertas:
                 continue
+            p = self._pendientes.get(clave)
+            if p is not None:
+                # Otro gesto con la vigilancia en curso (12-oct-2026): se
+                # alarga la ventana pero las rachas SIGUEN. Antes empezaban
+                # de cero, y la clienta del vídeo, que metió la mano dos
+                # veces en 11 s, borró la primera medida de su bajada
+                # (0,627) y el agarre no se confirmó.
+                p['desde'] = float(t)
+                continue
             self._pendientes[clave] = {'desde': float(t), 'racha_alta': 0,
                                        'racha_bajada': 0, 'racha_baja': 0,
                                        'ultima': -1e12}
@@ -398,6 +407,11 @@ class VigilanteStock:
             logger.error("stock[%s]: falló la vigilancia: %s",
                          self.camera_id, exc)
         self._publicar()
+
+    def vigilando(self, area: int) -> bool:
+        """¿Queda algún producto de `area` esperando su medida tras un
+        agarre? (12-oct-2026: el agarre espera a que termine.)"""
+        return any(c[0] == int(area) for c in self._pendientes)
 
     def drenar_sucesos(self) -> List[Dict[str, Any]]:
         sucesos, self._sucesos = self._sucesos, []
@@ -747,7 +761,12 @@ class VigilanteStock:
                     nombres_area.get(clave[0], f'Área {clave[0] + 1}'),
                     nombre, cambio, umbral, umbral_bajada, p['racha_alta'], n,
                     p.get('racha_bajada', 0), n, p['racha_baja'], n)
-        if p['racha_alta'] < n and p.get('racha_bajada', 0) >= n:
+        # Bajada con UNA medida (12-oct-2026, lo eligió el usuario): la
+        # primera medida tras coger es la más notoria (coffemate en el
+        # vídeo: 0,627 y luego 0,455-0,450). Si ya pasa el umbral de
+        # agotado se espera a su racha, que también cuenta como bajada.
+        n_bajada = int(self.cfg.get('stock_confirmaciones_bajada', n))
+        if cambio < umbral and p.get('racha_bajada', 0) >= n_bajada:
             self._confirmar_bajada(clave, frame, nombre, nombres_area,
                                    cambio, t)
             return
@@ -867,7 +886,8 @@ class VigilanteStock:
         self._sucesos.append(dict({
             'tipo': tipo, 'area': clave[0], 'nombre': area,
             'producto': nombre, 'ts': _hora(t), 'genero': None,
-            'rango_etario': None, 'id_corto': f'stock-{clave[0]}-{clave[1]}'},
+            'rango_etario': None, 'id_corto': f'stock-{clave[0]}-{clave[1]}',
+            'producto_idx': clave[1]},
             **extra))
 
     def _publicar(self) -> None:

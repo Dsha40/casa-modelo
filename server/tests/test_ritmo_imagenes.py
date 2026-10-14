@@ -28,6 +28,10 @@ sys.path.insert(0, str(RAIZ / 'server'))
 from src.analityc.core import ritmo_imagenes as ri  # noqa: E402
 from src.analityc.core.analytics.config import AnalyticsConfig  # noqa: E402
 from src.analityc.core.anaqueles import _DEFECTOS, MedidorAnaqueles  # noqa: E402
+# Estas pruebas fijan la MÁQUINA del gesto: desde el 12-oct-2026 los
+# defectos esperan la bajada para contar el agarre
+# (test_anaqueles_confirmacion.py).
+_REGLAS_DEL_GESTO = {'visita_por_muneca': False, 'agarre_requiere_bajada': False}
 from src.analityc.core.anaqueles_registro import RegistroAnaqueles  # noqa: E402
 
 
@@ -188,7 +192,7 @@ def _reloj(monkeypatch):
 
 
 def _agarres(tmp_path, guion, fps):
-    cfg = dict(_DEFECTOS)
+    cfg = dict(_DEFECTOS, **_REGLAS_DEL_GESTO)
     cfg['pose_cercania'] = True
     m = MedidorAnaqueles('cam', cfg, pose=_Pose(guion),
                          registro=RegistroAnaqueles('cam', raiz=tmp_path),

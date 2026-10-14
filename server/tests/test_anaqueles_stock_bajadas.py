@@ -179,3 +179,30 @@ def test_cada_bajada_guarda_su_foto_antes_y_despues(tmp_path):
     assert UMBRAL_BAJADA <= meta['cambio'] < UMBRAL_AGOTADO
     assert v.drenar_alertas() == []
 
+
+def test_otro_gesto_no_borra_las_medidas_en_curso(tmp_path):
+    """12-oct-2026: la clienta del vídeo metió la mano dos veces en 11 s;
+    el segundo gesto ponía la racha a cero y su bajada no se confirmaba.
+    Con 3 medidas exigidas: con una sola no hay racha que borrar."""
+    v = _con_ref(tmp_path, stock_confirmaciones_bajada=3)
+    v.tras_agarre(0, T0 + 10)
+    _pasar(v, FALTA_ALGO, T0 + 10, T0 + 13)            # 2 medidas de bajada
+    v.tras_agarre(0, T0 + 13.5)                        # vuelve a meter la mano
+    _pasar(v, FALTA_ALGO, T0 + 14, T0 + 16)            # 1 más: 3 de 3
+    assert v.bloque()['bajadas'] == [{'area': 0, 'producto_idx': 0, 'bajadas': 1}]
+
+
+def test_una_sola_medida_por_encima_confirma_la_bajada(tmp_path):
+    """12-oct-2026 (lo eligió el usuario): basta UNA medida >= umbral de
+    bajada; la primera tras coger es la más notoria. Con 3 exigidas, la
+    misma medida suelta no basta."""
+    v = _con_ref(tmp_path)
+    v.tras_agarre(0, T0 + 10)
+    _pasar(v, FALTA_ALGO, T0 + 12, T0 + 12)            # una sola medida
+    assert v.bloque()['bajadas'][0]['bajadas'] == 1
+    (tmp_path / 'tres').mkdir()
+    otro = _con_ref(tmp_path / 'tres', stock_confirmaciones_bajada=3)
+    otro.tras_agarre(0, T0 + 10)
+    _pasar(otro, FALTA_ALGO, T0 + 12, T0 + 12)
+    assert otro.bloque()['bajadas'] == []
+

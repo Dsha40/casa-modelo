@@ -86,6 +86,14 @@ _DEFECTOS: Dict[str, Any] = {
     # (v2, 14-ago: pasar CAMINANDO junto al estante ya no cuenta — el dwell
     # solo corre con el cuerpo quieto.)
     'visita_dwell_s': 1.5,
+    # Visita = la MUÑECA dentro del área (12-oct-2026, lo pidió el usuario):
+    # con el cuerpo, quien se paraba a mirar sin tocar contaba visita, y
+    # quien estiraba el brazo hacia la balda alta (cuerpo fuera del área)
+    # no. Con True la visita la da la pose: la muñeca dentro del polígono
+    # `visita_muneca_s` seguidos. False = la regla del cuerpo de antes
+    # (visita_dwell_s, visita_solape_min, quietud).
+    'visita_por_muneca': True,
+    'visita_muneca_s': 0.5,
     # La misma persona en el mismo nivel no re-cuenta visita hasta pasar esto.
     'visita_cooldown_s': 120.0,
     # Fracción mínima de la FRANJA superior del cuerpo que debe pisar el
@@ -222,6 +230,16 @@ _DEFECTOS: Dict[str, Any] = {
     # Interruptor (6-oct-2026): para la A/B de fps con y sin stock. Apagado,
     # no se vigila ni se arma nada tras un agarre.
     'stock_activo': True,
+    # El agarre se CONFIRMA con una bajada (12-oct-2026, lo pidió el
+    # usuario): el gesto de la muñeca solo deja el agarre «por confirmar»;
+    # cuenta cuando el stock ve que a un producto de esa área le falta algo
+    # (bajada o posible agotado), y se apunta a ESE producto (no al que
+    # caía bajo la muñeca: hallazgo 25). Si la vigilancia del área termina
+    # sin bajada (no cambió nada, nadie dejó ver la balda o no hay foto de
+    # referencia), se guarda como `agarres_sin_confirmar`: no suma, pero se
+    # puede revisar. False (o stock_activo False) = el gesto cuenta solo,
+    # como antes.
+    'agarre_requiere_bajada': True,
     # 9-oct-2026: 0,45 -> 0,80 -> 0,90 a petición del usuario, tras ver las
     # fotos de las alertas en vivo: con 0,70-0,84 se había cogido un
     # producto, pero la balda no estaba casi vacía (0,45 pasa a ser el
@@ -246,7 +264,13 @@ _DEFECTOS: Dict[str, Any] = {
     # foto de ese producto. SIN CALIBRAR: tras los agarres del 7-8 oct el
     # cambio medido estuvo entre 0,13 y 0,34 sin saber si faltaba algo. El
     # usuario lo fijó en 0,45 el 9-oct viendo las fotos («vamos probando»).
-    'stock_umbral_bajada': 0.45,
+    # 12-oct-2026: 0,445, también a petición suya. En el vídeo, coger un
+    # bote de coffemate cambió 0,627, 0,455, 0,455 y luego 0,450 (0,4498):
+    # una milésima rompía la racha. Lo que no se tocó, 0,07-0,20.
+    # 12-oct-2026 (tarde): 0,50 y UNA sola medida, elegido por el usuario:
+    # la primera medida tras coger es la más notoria.
+    'stock_umbral_bajada': 0.50,
+    'stock_confirmaciones_bajada': 1,
     # Cada tantas bajadas desde la última foto de balda surtida, aviso
     # «cerca de vaciarse». 0 = sin aviso.
     'stock_bajadas_aviso': 8,
@@ -332,6 +356,12 @@ class MedidorAnaqueles:
         self._visita_abierta: set = set()
         #: (área, pid) -> ts de la última visita CONTADA (cooldown).
         self._visita_ts: Dict[Tuple[int, str], float] = {}
+        #: Visita por muñeca (12-oct-2026): (área, pid) -> ts desde el que
+        #: hay una muñeca dentro, y desde el que no hay ninguna.
+        self._muneca_dentro_desde: Dict[Tuple[int, str], float] = {}
+        self._muneca_fuera_desde: Dict[Tuple[int, str], float] = {}
+        #: Agarres hechos que esperan su bajada (12-oct-2026).
+        self._agarres_por_confirmar: List[Dict[str, Any]] = []
 
         # ── Movimiento por track (v2/v3): quieto vs caminando ──
         #: tid -> deque[(t, cx, cy_sup, ancho_bbox)] (ventana corta). El
@@ -882,6 +912,7 @@ class MedidorAnaqueles:
         dwell_min = float(self.cfg.get('visita_dwell_s', 1.5))
         franja = float(self.cfg.get('franja_superior', 0.60))
         solape_min = float(self.cfg.get('visita_solape_min', 0.15))
+        por_muneca = bool(self.cfg.get('visita_por_muneca', False))
 
         ventana_dedup = float(self.cfg.get('dedup_espacial_ventana_s', 20.0))
         en_compuerta: set = set()
@@ -917,6 +948,8 @@ class MedidorAnaqueles:
                 en_compuerta.add(clave)
                 personas_por_area[idx] = personas_por_area.get(idx, 0) + 1
                 self._compuerta_desde.setdefault(clave, t)
+                if por_muneca:
+                    continue         # la visita la cuenta la muñeca
                 # El dwell SOLO corre con el cuerpo quieto: caminar junto
                 # al estante (lateral O hacia la cámara) es tránsito.
                 if not quieto:
@@ -1166,6 +1199,10 @@ class MedidorAnaqueles:
                 for lado, (mx, my) in vistos.items():
                     prof_de[(idx, lado)] = cv2.pointPolygonTest(
                         poli, (mx, my), True)
+
+            if self.cfg.get('visita_por_muneca', False):
+                self._visita_por_muneca(pid, tid, box, areas_de_pid, prof_de,
+                                        demografia, t, vivos)
 
             # Para el recuadro del operador: la muneca con su profundidad
             # respecto al area (positiva = dentro). Se toma AQUI porque es
@@ -1447,6 +1484,52 @@ class MedidorAnaqueles:
         if sucesos:
             self._feed.extend(sucesos)
             self._feed_sucio = True
+        self._confirmar_por_stock(sucesos, t)
+
+    def _confirmar_por_stock(self, sucesos: List[Dict[str, Any]],
+                             t: float) -> None:
+        """Confirma los agarres por confirmar con las bajadas (o posibles
+        agotados) que acaba de ver el stock, y aparta como «sin confirmar»
+        los de áreas que ya no se vigilan (12-oct-2026). Un agarre por
+        bajada, el más antiguo de su área; el producto es el que bajó."""
+        if not self._agarres_por_confirmar:
+            return
+        for s in sucesos:
+            if s.get('tipo') not in ('bajada', 'agotado'):
+                continue
+            idx = s.get('area')
+            ag = next((a for a in self._agarres_por_confirmar
+                       if a['idx'] == idx and a['t'] <= t), None)
+            if ag is None:
+                continue
+            self._agarres_por_confirmar.remove(ag)
+            total = self.registro.sumar(idx, 'agarres', self._nombre(idx))
+            producto = s.get('producto')
+            if s.get('producto_idx') is not None:
+                self.registro.sumar_producto(idx, int(s['producto_idx']),
+                                             producto or '')
+            self._evento('agarre', idx, ag['pid'], ag['genero'], ag['rango'],
+                         ag['t'], producto=producto)
+            logger.info("anaqueles[%s] AGARRE #%d en %s%s (%s), confirmado "
+                        "por %s %.0f s después del gesto", self.camera_id,
+                        total, self._nombre(idx),
+                        f' → {producto}' if producto else '',
+                        _corto(ag['pid']), s.get('tipo'), t - ag['t'])
+        # Sin bajada: la vigilancia de su área terminó (o nunca empezó: sin
+        # foto de referencia). Margen de 1 s para que el stock la arme.
+        tope = float(self.cfg.get('stock_ventana_s', 180.0)) + 10.0
+        for ag in list(self._agarres_por_confirmar):
+            if (t - ag['t']) < 1.0:
+                continue
+            if self._stock.vigilando(ag['idx']) and (t - ag['t']) < tope:
+                continue
+            self._agarres_por_confirmar.remove(ag)
+            n = self.registro.sumar(ag['idx'], 'agarres_sin_confirmar',
+                                    self._nombre(ag['idx']))
+            logger.info("anaqueles[%s] gesto de agarre en %s (%s) SIN "
+                        "CONFIRMAR: ninguna bajada (%d sin confirmar hoy)",
+                        self.camera_id, self._nombre(ag['idx']),
+                        _corto(ag['pid']), n)
 
     def _calor(self, idx: int, x: float, y: float, peso: float) -> None:
         ax1, ay1, ax2, ay2 = self._cajas_area[idx]
@@ -1466,10 +1549,75 @@ class MedidorAnaqueles:
         logger.info("anaqueles[%s] visita #%d a %s (%s)",
                     self.camera_id, total, self._nombre(idx), _corto(pid))
 
+    def _visita_por_muneca(self, pid: str, tid: Any, box: Tuple,
+                           areas: List[int],
+                           prof_de: Dict[Tuple[int, str], float],
+                           demografia: Any, t: float,
+                           vivos: Optional[set]) -> None:
+        """Visita = una muñeca dentro del polígono del área
+        `visita_muneca_s` seguidos (12-oct-2026). Una visita por estancia de
+        la mano: se reabre cuando la mano lleva >1,2 s fuera (la misma
+        gracia que la compuerta del cuerpo) y pasó `visita_cooldown_s`
+        desde la anterior de esa persona en esa área."""
+        minimo = float(self.cfg.get('visita_muneca_s', 0.5))
+        cooldown = float(self.cfg.get('visita_cooldown_s', 120.0))
+        ventana_dedup = float(self.cfg.get('dedup_espacial_ventana_s', 20.0))
+        cx = (float(box[0]) + float(box[2])) / 2.0
+        cy = (float(box[1]) + float(box[3])) / 2.0
+        ancho = max(1.0, float(box[2]) - float(box[0]))
+        for idx in areas:
+            clave = (idx, pid)
+            dentro = any(prof >= 0.0 for (j, _lado), prof in prof_de.items()
+                         if j == idx)
+            if not dentro:
+                self._muneca_dentro_desde.pop(clave, None)
+                fuera = self._muneca_fuera_desde.setdefault(clave, t)
+                if (t - fuera) > 1.2:
+                    self._visita_abierta.discard(clave)
+                continue
+            self._muneca_fuera_desde.pop(clave, None)
+            desde = self._muneca_dentro_desde.setdefault(clave, t)
+            if clave in self._visita_abierta:
+                self._visita_ts[clave] = t
+                self._refrescar_reciente(self._visitas_recientes, idx, cx, cy,
+                                         ancho, t, tid, vivos=vivos)
+                continue
+            if ((t - desde) < minimo
+                    or (t - self._visita_ts.get(clave, -1e12)) < cooldown):
+                continue
+            self._visita_abierta.add(clave)
+            if self._dedup_espacial(self._visitas_recientes, idx, cx, cy,
+                                    ancho, t, ventana_dedup, tid=tid,
+                                    vivos=vivos):
+                self._refrescar_reciente(self._visitas_recientes, idx, cx, cy,
+                                         ancho, t, tid, vivos=vivos)
+                self._anotar_descarte('visita_dedup_espacial')
+                continue
+            self._visita_ts[clave] = t
+            self._visitas_recientes.setdefault(
+                idx, deque(maxlen=40)).append((t, cx, cy, ancho, tid))
+            self._contar_visita(idx, pid, tid, demografia, t)
+
+    def _requiere_bajada(self) -> bool:
+        return bool(self.cfg.get('agarre_requiere_bajada', False)
+                    and self.cfg.get('stock_activo', True))
+
     def _contar_agarre(self, idx: int, pid: str, tid: Any,
                        demografia: Any, t: float,
                        x: Optional[float] = None,
                        y: Optional[float] = None) -> None:
+        if self._requiere_bajada():
+            # El gesto solo deja el agarre POR CONFIRMAR (12-oct-2026): lo
+            # confirma la bajada que vea el stock (`_confirmar_por_stock`).
+            genero, rango = self._rasgos(demografia, tid)
+            self._agarres_por_confirmar.append({
+                'idx': idx, 'pid': pid, 'tid': tid, 't': t,
+                'genero': genero, 'rango': rango})
+            self._stock.tras_agarre(idx, t, persona=self._recorte_de(tid))
+            logger.info("anaqueles[%s] gesto de agarre en %s (%s): espera "
+                        "su bajada para contar", self.camera_id,
+                        self._nombre(idx), _corto(pid))
+            return
         total = self.registro.sumar(idx, 'agarres', self._nombre(idx))
         genero, rango = self._rasgos(demografia, tid)
         producto = self._repartir_a_producto(idx, x, y)
@@ -1568,6 +1716,8 @@ class MedidorAnaqueles:
         self._compuerta_desde.clear()
         self._quieto_en_area.clear()
         self._visita_abierta.clear()
+        self._muneca_dentro_desde.clear()
+        self._muneca_fuera_desde.clear()
         self._agarre_estado.clear()
         self._agarre_pendiente.clear()
         self._trayectoria.clear()
