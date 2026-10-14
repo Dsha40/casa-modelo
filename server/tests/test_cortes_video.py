@@ -6,12 +6,17 @@ salta pasados 0,4 s (el vídeo normal repite como mucho una); al volver el
 vídeo se alarga la espera de los géneros pendientes y, tras una pausa
 larga, se reinicia el seguimiento; la respuesta en pausa no lleva cajas ni
 repite alertas; y `tiendas.py`/`anaqueles.py` lo usan donde deben.
+
+Y `sin_video` (SIEMPRE activo): reconoce la imagen gris del corte —no una
+balda vacía— y con ella ni se guarda el fondo del mapa de calor ni la foto
+del anaquel (lo del stock está en `test_anaqueles_stock_bajadas.py`).
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -99,3 +104,89 @@ def test_tiendas_y_anaqueles_lo_usan_donde_deben():
     assert 'cortes_video.recordar(cam_state, metadata)' in src
     anq = (RAIZ / 'anaqueles.py').read_text(encoding='utf-8')
     assert "metadata.get('congelado')" in anq
+
+
+# ── Imagen sin vídeo (siempre activo) ────────────────────────────────────
+def _con_video(alto=480, ancho=640):
+    """Una escena: balda clara con cajas oscuras y suelo a rayas."""
+    f = np.full((alto, ancho, 3), 90, np.uint8)
+    f[alto * 5 // 8:] = (((np.arange(ancho) // 16) % 2) * 120 + 40).astype(np.uint8)[None, :, None]
+    f[60:140, 80:560] = 200
+    f[70:130, 100:180] = 30
+    return f
+
+
+def _gris_de_ivms(alto=852, ancho=1440):
+    """La del corte: gris casi liso (ruido de JPEG) y alrededor la ventana
+    de iVMS (barras, borde, botones), fuera del centro."""
+    rng = np.random.default_rng(7)
+    f = np.clip(rng.normal(78, 3, (alto, ancho, 1)), 0, 255).astype(np.uint8).repeat(3, 2)
+    f[:40] = 30
+    f[-40:] = 30
+    f[:, :20] = 200
+    f[5:35, 50:400:40] = 230
+    return f
+
+
+def test_sin_video_reconoce_la_gris_de_ivms_y_no_una_balda_vacia():
+    gris = _gris_de_ivms()
+    assert gris.std() > 10              # entera NO es lisa: por eso se mira el centro
+    assert cv_.sin_video(gris) is True
+    assert cv_.sin_video(np.zeros((480, 640, 3), np.uint8)) is True
+    assert cv_.sin_video(_con_video()) is False
+    vacia = _con_video()
+    vacia[60:140, 80:560] = 120         # balda vacía y lisa, pero hay vídeo
+    assert cv_.sin_video(vacia) is False
+
+
+def test_sin_video_nunca_lanza():
+    assert cv_.sin_video(None) is False
+    assert cv_.sin_video(np.zeros((0, 0, 3), np.uint8)) is False
+    assert cv_.sin_video('no es una imagen') is False
+
+
+def test_el_mapa_de_calor_no_guarda_la_gris_de_fondo(tmp_path):
+    """Antes cada 60 s: en un corte no hay nadie y el mapa no revisaba la
+    escena. Con la gris se queda el último fondo bueno."""
+    from src.analityc.core.analytics.heatmap import HeatmapAccumulator
+    acc = HeatmapAccumulator()
+    acc.add_person((100, 100, 140, 300), 640, 480)
+
+    def foto(fondo):
+        acc._last_snapshot_ts = acc._last_bg_ts = 0.0
+        acc.maybe_save_snapshot('cam-gris', background=fondo,
+                                out_dir=str(tmp_path), every_s=0, personas=0)
+        rutas = [r for r in (tmp_path / 'bg').glob('*.jpg') if '.tmp' not in r.name]
+        return cv2.imread(str(rutas[0])) if rutas else None
+
+    assert foto(_gris_de_ivms(480, 640)) is None
+    bueno = foto(_con_video())
+    assert bueno is not None
+    assert np.array_equal(foto(_gris_de_ivms(480, 640)), bueno)
+
+
+def test_la_gris_no_sirve_de_foto_del_anaquel(tmp_path):
+    from src.analityc.core.anaqueles import MedidorAnaqueles, _DEFECTOS
+    from src.analityc.core.anaqueles_registro import RegistroAnaqueles
+
+    class PoseNula:
+        disponible = False
+
+        def munecas(self, frame, box):
+            return []
+
+    class EscenaMuda:
+        def evaluar(self, *a, **k):
+            return None
+
+    m = MedidorAnaqueles(
+        'cam-gris', dict(_DEFECTOS), pose=PoseNula(),
+        registro=RegistroAnaqueles('cam-gris', raiz=tmp_path),
+        escena=EscenaMuda(), identificador=None)
+    m.poner_zonas([[[100, 100], [300, 100], [300, 200], [100, 200]]], ['Anaquel 1'])
+    ref = tmp_path / 'cam-gris' / 'fotos_ref' / '0.jpg'
+    m.procesar(_gris_de_ivms(480, 640), {}, ahora=1000.0)
+    assert not ref.exists()
+    # La gris no gastó el turno de 10 min: con vídeo, la foto sale ya.
+    m.procesar(_con_video(), {}, ahora=1001.0)
+    assert ref.exists()

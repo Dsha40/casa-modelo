@@ -1448,6 +1448,10 @@ class MedidorAnaqueles:
         sin abrir compuerta salía «quemado» en la base. Nunca lanza.
         """
         try:
+            # Imagen gris de un corte de iVMS: no sirve de foto del anaquel.
+            from . import cortes_video
+            if cortes_video.sin_video(frame):
+                return
             cuerpos = ([b for _p, _tid, b in clientes]
                        + [b for _p, _tid, b, _f in personal])
             for idx, caja in enumerate(self._cajas_area):

@@ -49,9 +49,16 @@ DELANTE = (120, 60, 220, 470)
 LEJOS = (450, 60, 550, 470)
 
 
+#: Suelo a rayas, abajo y lejos del producto: una imagen real nunca es lisa,
+#: y una lisa ENTERA es la de un corte de vídeo, que el vigilante no mide
+#: (13-oct-2026, `cortes_video.sin_video`).
+SUELO = (((np.arange(640) // 16) % 2) * 120 + 40).astype(np.uint8)[None, :, None]
+
+
 def _frame(relleno: str, brillo: float = 1.0) -> np.ndarray:
     """Frame con el recuadro del producto «surtido» (ajedrez) o «vacío»."""
     f = np.full((480, 640, 3), 90, dtype=np.uint8)
+    f[300:460] = SUELO
     if relleno == 'surtido':
         yy, xx = np.mgrid[100:181, 100:201]
         tablero = (((yy // 10) + (xx // 10)) % 2) * 150 + 40
@@ -288,10 +295,14 @@ def test_el_agarre_del_medidor_arranca_la_vigilancia(tmp_path, monkeypatch):
         personas.append(persona)
         return real(area, t, persona=persona)
     monkeypatch.setattr(m._stock, 'tras_agarre', espia)
+    # El FRAME de esas pruebas es negro entero: para el stock, un corte de
+    # vídeo (no lo mira). Con suelo a rayas es una imagen con vídeo.
+    frame = tp.FRAME.copy()
+    frame[300:460] = SUELO
     bloques = []
     for i in range(8):
         bloques.append(m.procesar(
-            tp.FRAME, {1: {'class': -1, 'box': list(tp.BOX_EN_AREA),
+            frame, {1: {'class': -1, 'box': list(tp.BOX_EN_AREA),
                            'persistent_id': None}}, ahora=medio + i * 0.5))
     assert m.registro.area(0)['agarres'] == 1
     assert avisos == [0]                  # el agarre llegó al vigilante

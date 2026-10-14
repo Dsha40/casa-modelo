@@ -32,6 +32,16 @@ Cada corte deja dos líneas en el log:
 
     CORTE [cam] imagen congelada: seguimiento en pausa
     CORTE [cam] vuelve el vídeo tras 29 s (430 imágenes sin procesar)
+
+## `sin_video` (SIEMPRE activo, aparte del parche)
+
+Reconoce la imagen gris del corte (y la negra) para que nada la tome por la
+tienda. Sin ella, el 13-oct-2026: dos bajadas falsas de stock a las 08:11
+que confirmaron un agarre, y el fondo del mapa de calor guardado en gris
+(el mapa solo comprueba la escena cuando ve a alguien, `tiendas.py`, y en
+un corte no hay nadie: cada 60 s guardaba la gris de fondo, también de
+noche). La usan el stock, las fotos de referencia de los anaqueles y el
+fondo del mapa de calor.
 """
 
 from __future__ import annotations
@@ -106,6 +116,30 @@ def congelada(estado: Dict[str, Any], imagen: np.ndarray, ahora: float,
         return False
     except Exception as exc:                                # noqa: BLE001
         logger.debug("cortes_video: sin comprobar (%s)", exc)
+        return False
+
+
+#: Desviación del CENTRO de la imagen (donde va el vídeo) por debajo de la
+#: cual no hay vídeo. Medido el 13-oct-2026: la imagen gris de los cortes de
+#: iVMS da 4,7 en el centro (19,5 la imagen entera, por los bordes de la
+#: ventana); una imagen normal del pasillo, mucho más. Una balda vacía no
+#: deja lisa la imagen ENTERA, así que no se confunde con un agotado.
+LISO_CENTRO = 10.0
+
+
+def sin_video(imagen: Any) -> bool:
+    """True si la imagen es la pantalla lisa de un corte (gris, negra...).
+    SIEMPRE activo (no depende del parche opcional): lo usan el stock, las
+    fotos de referencia de los anaqueles y el fondo del mapa de calor, que
+    el 13-oct-2026 llegaron a medir o guardarse sobre la imagen gris (dos
+    bajadas falsas a las 08:11 y un fondo de mapa gris). Nunca lanza."""
+    try:
+        if imagen is None or getattr(imagen, 'size', 0) == 0:
+            return False
+        gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY) if imagen.ndim == 3 else imagen
+        chica = cv2.resize(gris, (160, 90), interpolation=cv2.INTER_AREA)
+        return float(chica[9:81, 8:152].std()) < LISO_CENTRO
+    except Exception:                                       # noqa: BLE001
         return False
 
 

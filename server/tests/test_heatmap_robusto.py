@@ -144,6 +144,9 @@ def test_ref_del_area_solo_con_el_area_vacia(tmp_path):
             return None
 
     frame = np.full((480, 640, 3), 60, dtype=np.uint8)
+    # Suelo a rayas lejos del área: una imagen lisa ENTERA es la de un corte
+    # de vídeo y no sirve de foto (13-oct-2026, `cortes_video.sin_video`).
+    frame[300:460] = (((np.arange(640) // 16) % 2) * 120 + 40).astype(np.uint8)[None, :, None]
     area = [[100, 100], [300, 100], [300, 200], [100, 200]]
     m = MedidorAnaqueles(
         'cam-ref', dict(_DEFECTOS), pose=PoseNula(),

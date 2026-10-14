@@ -691,6 +691,12 @@ class HeatmapAccumulator:
             # el ultimo fondo bueno y no se guarda fondo nuevo.
             if not self._escena_ok:
                 background = self._bg_guardado(camera_id, out_dir)
+            # Imagen gris de un corte de iVMS (13-oct-2026): como una escena
+            # ajena — el último fondo bueno, y no se guarda la gris de fondo.
+            from .. import cortes_video
+            _sin_video = cortes_video.sin_video(background)
+            if _sin_video:
+                background = self._bg_guardado(camera_id, out_dir)
 
             # Cierre de hora: guardar historico si corresponde
             self._maybe_roll_hour(camera_id, camera_name, background,
@@ -700,7 +706,7 @@ class HeatmapAccumulator:
             # gente solo si el fondo guardado ya esta muy viejo (15 min).
             _sin_gente = personas is None or int(personas) == 0
             _bg_edad = now - self._last_bg_ts
-            if (self._escena_ok
+            if (self._escena_ok and not _sin_video
                     and background is not None and background.size > 0
                     and _bg_edad >= AnalyticsConfig.HEATMAP_BG_EVERY_S
                     and (_sin_gente or _bg_edad >= 900.0)):

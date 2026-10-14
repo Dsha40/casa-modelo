@@ -401,6 +401,12 @@ class VigilanteStock:
         """Un frame: atender la petición de foto, medir lo pendiente y lo
         que está en alerta. Nunca lanza."""
         self._t = float(t)
+        # Imagen gris de un corte de iVMS (13-oct-2026, `cortes_video.py`):
+        # ni se mide ni se toma foto (a las 08:11 dio dos bajadas falsas).
+        from . import cortes_video
+        if cortes_video.sin_video(frame):
+            self._publicar()
+            return
         try:
             self._vigilar(frame, productos, nombres_area, cuerpos, t)
         except Exception as exc:                            # noqa: BLE001

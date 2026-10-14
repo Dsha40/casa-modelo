@@ -37,8 +37,11 @@ LEJOS = (520, 300, 620, 470)
 
 
 def _frame(gris_ancho: int = 0) -> np.ndarray:
-    """Balda surtida (tablero) con los primeros `gris_ancho` px «vacíos»."""
+    """Balda surtida (tablero) con los primeros `gris_ancho` px «vacíos».
+    Abajo, un suelo a rayas: una imagen lisa ENTERA es la de un corte de
+    vídeo, y esa no se mide (`cortes_video.sin_video`)."""
     f = np.full((480, 640, 3), 90, dtype=np.uint8)
+    f[300:460] = (((np.arange(640) // 16) % 2) * 120 + 40).astype(np.uint8)[None, :, None]
     for x0 in (100, 350):
         yy, xx = np.mgrid[100:181, x0:x0 + 101]
         f[100:181, x0:x0 + 101] = ((((yy // 10) + (xx // 10)) % 2) * 150 + 40)[..., None]
@@ -206,3 +209,20 @@ def test_una_sola_medida_por_encima_confirma_la_bajada(tmp_path):
     _pasar(otro, FALTA_ALGO, T0 + 12, T0 + 12)
     assert otro.bloque()['bajadas'] == []
 
+
+def test_la_imagen_gris_de_un_corte_ni_se_mide_ni_sirve_de_foto(tmp_path):
+    """13-oct-2026: a las 08:11 iVMS mandó su imagen gris de corte y dos
+    medidas sobre ella dieron bajadas falsas (0,83 y 0,78) que confirmaron un
+    agarre. Con la imagen ENTERA lisa no se mide ni se toma foto. Un
+    recuadro liso en una imagen con vídeo (balda vacía) sí se mide: eso lo
+    fijan las demás pruebas de bajadas."""
+    gris = np.full_like(SURTIDO, 78)
+    v = _con_ref(tmp_path)
+    v.tras_agarre(0, T0 + 10)
+    _pasar(v, gris, T0 + 10, T0 + 20)
+    assert v.bloque()['bajadas'] == []
+    # Y una foto pedida durante el corte espera a que vuelva la imagen.
+    st.pedir_referencia(CAM, 0, 0)
+    v.vigilar(gris, PRODUCTOS, NOMBRES, [LEJOS], T0 + 30)
+    x1, y1, x2, y2 = v._refs[(0, 0)]['caja']
+    assert not np.array_equal(v._refs[(0, 0)]['img'], gris[y1:y2, x1:x2])
