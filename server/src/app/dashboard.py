@@ -1010,7 +1010,8 @@ function stockTarjeta(h){
      data-lleva="${h.lleva_s}">${fmtDur(h.lleva_s)}</span>`
   :`<span style="color:var(--muted)">hace ${fmtDur(h.lleva_s)}</span>`;
  const tipo=h.tipo==='cerca'
-  ?`Cerca de vaciarse${h.bajadas?` (${h.bajadas} bajadas)`:''}`:'Posible agotado';
+  ?`Cerca de vaciarse${h.bajadas?` (${h.bajadas} bajadas)`:''}`
+  :h.tipo==='bajada'?`Bajada ${h.bajadas||''}`:'Posible agotado';
  return `<a href="${img}" target="_blank" class="${h.activa?'activa':''}"
    title="Abrir foto: antes | ahora | quien cogio">
   <img loading="lazy" src="${img}">

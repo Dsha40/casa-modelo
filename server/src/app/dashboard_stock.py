@@ -31,9 +31,9 @@ from fastapi.responses import FileResponse
 router = APIRouter()
 
 _RAIZ = Path('output') / 'anaqueles'
-#: `..._cerca.jpg` = aviso «cerca de vaciarse» (9-oct-2026); sin sufijo,
-#: «posible agotado».
-_FOTO = re.compile(r'^(\d{4}-\d{2}-\d{2})_(\d{6})_(\d+)_(\d+)(_cerca)?\.jpg$')
+#: `..._cerca.jpg` = aviso «cerca de vaciarse» (9-oct-2026); `..._bajada.jpg`
+#: = una bajada (12-oct-2026); sin sufijo, «posible agotado».
+_FOTO = re.compile(r'^(\d{4}-\d{2}-\d{2})_(\d{6})_(\d+)_(\d+)(_cerca|_bajada)?\.jpg$')
 _MAX_HISTORIAL = 60
 
 
@@ -105,24 +105,33 @@ def resumen_stock(raiz: Optional[Path] = None) -> Dict[str, Any]:
                 if not m:
                     continue
                 fecha, hms, area, prod = m.group(1), m.group(2), int(m.group(3)), int(m.group(4))
-                tipo = 'cerca' if m.group(5) else 'agotado'
+                tipo = (m.group(5) or '_agotado')[1:]
+                # El .json de al lado (desde el 12-oct-2026) guarda el cambio
+                # y la cuenta de bajadas; las fotos anteriores no lo tienen.
+                meta: Dict[str, Any] = {}
+                try:
+                    meta = json.loads(f.with_suffix('.json').read_text(encoding='utf-8'))
+                except Exception:                           # noqa: BLE001
+                    pass
                 try:
                     t = time.mktime(time.strptime(f'{fecha} {hms}', '%Y-%m-%d %H%M%S'))
                 except ValueError:
                     continue
                 hora = f'{hms[:2]}:{hms[2:4]}:{hms[4:]}'
-                viva = next((a for a in vivas if a.get('area') == area
+                viva = None if tipo == 'bajada' else next((a for a in vivas if a.get('area') == area
                              and a.get('producto_idx') == prod
                              and a.get('desde') == hora
                              and a.get('tipo') == tipo), None)
                 n = nombres.get((area, prod), {})
                 historial.append({
-                    'tipo': tipo, 'bajadas': (viva or {}).get('bajadas'),
+                    'tipo': tipo,
+                    'bajadas': (viva or {}).get('bajadas') or meta.get('bajadas'),
                     'camara': camara.name, 'archivo': f.name, 't': t,
                     'fecha': fecha, 'hora': hora,
                     'area': (viva or {}).get('area_nombre') or n.get('area') or f'Área {area + 1}',
-                    'producto': (viva or {}).get('producto') or n.get('producto') or f'Producto {prod + 1}',
-                    'cambio': (viva or {}).get('cambio'),
+                    'producto': ((viva or {}).get('producto') or meta.get('producto')
+                                 or n.get('producto') or f'Producto {prod + 1}'),
+                    'cambio': (viva or {}).get('cambio') or meta.get('cambio'),
                     'activa': viva is not None,
                     # Segundos que lleva: el del pipeline si sigue viva; si
                     # no, desde la foto (la alerta pudo cerrarse o perderse

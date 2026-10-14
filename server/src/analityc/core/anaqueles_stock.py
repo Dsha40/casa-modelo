@@ -664,7 +664,8 @@ class VigilanteStock:
             persona = self._ultima_persona.get(clave[0])
             img_persona = persona['img'] if persona else None
             ruta = self._guardar_evidencia(clave, ref['img'], ahora,
-                                           img_persona, nombre, t, tipo=tipo)
+                                           img_persona, nombre, t, tipo=tipo,
+                                           cambio=cambio, bajadas=bajadas)
             self._alertas_salida.append({
                 'tipo': tipo, 'bajadas': bajadas,
                 'area': clave[0], 'producto_idx': clave[1],
@@ -678,24 +679,33 @@ class VigilanteStock:
                          "%s", self.camera_id, nombre, exc)
 
     def _guardar_evidencia(self, clave: Clave, antes, ahora, persona,
-                           nombre: str, t: float,
-                           tipo: str = 'agotado') -> Optional[Path]:
+                           nombre: str, t: float, tipo: str = 'agotado',
+                           cambio: Optional[float] = None,
+                           bajadas: int = 0) -> Optional[Path]:
         """`stock_alertas/<fecha>_<hora>_<área>_<producto>.jpg` junto a las
-        referencias (`..._cerca.jpg` para «cerca de vaciarse»). Son fotos de
-        clientes: viven en `output/`, fuera de git, como las fichas."""
+        referencias (`..._cerca.jpg` para «cerca de vaciarse», `..._bajada.jpg`
+        para cada bajada). Son fotos de clientes: viven en `output/`, fuera
+        de git, como las fichas. Al lado, un `.json` con el cambio y la
+        cuenta de bajadas (12-oct-2026): el dashboard los enseña también
+        cuando la alerta ya no está en memoria."""
         try:
             carpeta = self._carpeta.parent / 'stock_alertas'
             carpeta.mkdir(parents=True, exist_ok=True)
-            sufijo = '_cerca' if tipo == 'cerca' else ''
+            sufijo = {'cerca': '_cerca', 'bajada': '_bajada'}.get(tipo, '')
             ruta = carpeta / (time.strftime('%Y-%m-%d_%H%M%S',
                                             time.localtime(t))
                               + f'_{clave[0]}_{clave[1]}{sufijo}.jpg')
-            titulo = 'Cerca de vaciarse' if tipo == 'cerca' else 'Posible agotado'
+            titulo = {'cerca': 'Cerca de vaciarse',
+                      'bajada': f'Bajada {bajadas}'}.get(tipo, 'Posible agotado')
             img = componer_evidencia(antes, ahora, persona, nombre, titulo)
             ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 88])
             if not ok:
                 return None
             ruta.write_bytes(buf.tobytes())
+            ruta.with_suffix('.json').write_text(json.dumps({
+                'tipo': tipo, 'producto': nombre,
+                'cambio': round(float(cambio), 3) if cambio is not None else None,
+                'bajadas': int(bajadas)}, ensure_ascii=False), encoding='utf-8')
             return ruta
         except Exception as exc:                            # noqa: BLE001
             logger.warning("stock[%s]: no se pudo guardar la evidencia: %s",
@@ -775,6 +785,21 @@ class VigilanteStock:
         logger.info("stock[%s]: BAJADA %d de %s en %s (cambio %.3f); se "
                     "rehace su foto", self.camera_id, n, nombre, area_nombre,
                     cambio)
+        # Foto antes | ahora | quién de CADA bajada (12-oct-2026, lo pidió
+        # el usuario): con el posible agotado a 0,90 casi no salta ninguna
+        # alerta, y así puede revisar en el dashboard cada vez que falta algo.
+        try:
+            ref = self._refs[clave]
+            x1, y1, x2, y2 = ref['caja']
+            persona = self._ultima_persona.get(clave[0])
+            self._guardar_evidencia(clave, ref['img'],
+                                    frame[y1:y2, x1:x2].copy(),
+                                    persona['img'] if persona else None,
+                                    nombre, t, tipo='bajada', cambio=cambio,
+                                    bajadas=n)
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("stock[%s]: sin foto de la bajada de %s: %s",
+                           self.camera_id, nombre, exc)
         cada = int(self.cfg.get('stock_bajadas_aviso', 8))
         if cada > 0 and n % cada == 0:
             self._cerca[clave] = {

@@ -899,6 +899,81 @@ document.getElementById('mas').addEventListener('click', () => {
 });
 
 refrescar(pintar, 15);
+
+/* ── Stock (12-oct-2026) ──────────────────────────────────────────────
+ * Lo pidió el usuario para revisar los productos que se acaban: cada
+ * bajada, «cerca de vaciarse» y «posible agotado», con su foto antes |
+ * ahora | quién. Lee la misma API que el dashboard antiguo
+ * (/dashboard/api/stock, `dashboard_stock.py`). No sigue el periodo de
+ * arriba: enseña las más recientes (el servidor devuelve hasta 60). */
+const NOMBRE_STOCK = { bajada: 'Bajada', cerca: 'Cerca de vaciarse', agotado: 'Posible agotado' };
+let filtroStock = 'todas';
+let datosStock = null;
+
+function duracionStock(s) {
+  s = Math.max(0, Math.round(s));
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.floor(s % 3600 / 60)} min`;
+  return `${Math.floor(s / 86400)} d ${Math.floor(s % 86400 / 3600)} h`;
+}
+
+function tarjetaStock(h) {
+  const src = `/dashboard/img/stock/${encodeURIComponent(h.camara)}/${encodeURIComponent(h.archivo)}`;
+  const tipo = NOMBRE_STOCK[h.tipo] || h.tipo;
+  const titulo = `${tipo}${h.bajadas ? ' ' + h.bajadas : ''} · ${h.producto} (${h.area})`;
+  const sub = `${h.fecha} ${h.hora}${h.cambio != null ? ' · cambio ' + h.cambio : ''}`;
+  return html`<a class="item ${h.activa ? 'activa' : ''}" href="${src}"
+             data-titulo="${titulo}" data-sub="${sub}">
+    <img loading="lazy" src="${src}" alt="antes y después de ${h.producto}">
+    <div class="pie">
+      <b>${titulo}</b>
+      ${h.activa ? html`<span class="pill">ACTIVA · lleva ${duracionStock(h.lleva_s)}</span>` : ''}
+      <small>${sub}</small>
+    </div></a>`;
+}
+
+function pintarStockGaleria() {
+  const cont = document.getElementById('stock');
+  const d = datosStock;
+  if (!d) return;
+  const cuenta = { todas: d.historial.length, bajada: 0, cerca: 0, agotado: 0 };
+  d.historial.forEach(h => { cuenta[h.tipo] = (cuenta[h.tipo] || 0) + 1; });
+  document.getElementById('stock-filtros').innerHTML = ['todas', 'bajada', 'cerca', 'agotado']
+    .map(f => html`<button class="chip ${filtroStock === f ? 'activo' : ''}" data-f="${f}">${
+      f === 'todas' ? 'Todas' : NOMBRE_STOCK[f]} (${cuenta[f] || 0})</button>`).join('');
+  document.getElementById('stock-bajadas').innerHTML = (d.bajadas || []).length
+    ? 'Bajadas desde la última foto de balda surtida: ' + d.bajadas.map(b =>
+        html`<b>${b.producto}</b> ${b.bajadas}`).join(' · ')
+    : '';
+  const filas = d.historial.filter(h => filtroStock === 'todas' || h.tipo === filtroStock);
+  cont.innerHTML = filas.length ? filas.map(tarjetaStock).join('')
+    : '<div class="vacio">sin fotos de stock todavía — salen tras un agarre, cuando el producto tiene foto de referencia</div>';
+}
+
+async function pintarStock() {
+  const r = await fetch('/dashboard/api/stock', { cache: 'no-store' });
+  const d = await r.json();
+  if (d.status !== 'ok') throw new Error(d.message || 'stock');
+  datosStock = d;
+  pintarStockGaleria();
+}
+
+document.getElementById('stock-filtros').addEventListener('click', e => {
+  const b = e.target.closest('button[data-f]');
+  if (!b) return;
+  filtroStock = b.dataset.f;
+  pintarStockGaleria();
+});
+document.getElementById('stock').addEventListener('click', e => {
+  const a = e.target.closest('a.item');
+  if (!a) return;
+  e.preventDefault();
+  abrirLightbox({ titulo: a.dataset.titulo, sub: a.dataset.sub, src: a.getAttribute('href') });
+});
+(async function cicloStock() {
+  try { await pintarStock(); } catch (e) { console.error(e); }
+  setTimeout(cicloStock, 15000);
+})();
 // Los anaqueles cambian despacio (contadores del día): cada 30 s basta y no
 // compite con el refresco principal. Bucle autoencadenado, no setInterval:
 // una pasada lenta no puede solaparse con la siguiente.

@@ -160,3 +160,22 @@ def test_cada_n_bajadas_avisa_cerca_de_vaciarse_y_la_foto_surtida_lo_cierra(tmp_
     st.pedir_referencia(CAM, 0, 0)
     v.vigilar(SURTIDO, PRODUCTOS, NOMBRES, [LEJOS], T0 + 50)
     assert v.bloque()['cerca'] == [] and v.bloque()['bajadas'] == []
+
+
+def test_cada_bajada_guarda_su_foto_antes_y_despues(tmp_path):
+    """12-oct-2026, lo pidió el usuario: con el posible agotado a 0,90 casi
+    no salta ninguna alerta; cada bajada deja su foto para revisarla en el
+    dashboard, con el cambio y la cuenta al lado. No es una alerta: el panel
+    del cliente no recibe nada."""
+    import json
+    v = _con_ref(tmp_path)
+    v.tras_agarre(0, T0 + 10)
+    _pasar(v, FALTA_ALGO, T0 + 10, T0 + 20)
+    fotos = list((tmp_path / 'stock_alertas').glob('*_0_0_bajada.jpg'))
+    assert len(fotos) == 1 and fotos[0].stat().st_size > 1000
+    meta = json.loads(fotos[0].with_suffix('.json').read_text(encoding='utf-8'))
+    assert meta['tipo'] == 'bajada' and meta['bajadas'] == 1
+    assert meta['producto'] == 'Colcafe'
+    assert UMBRAL_BAJADA <= meta['cambio'] < UMBRAL_AGOTADO
+    assert v.drenar_alertas() == []
+

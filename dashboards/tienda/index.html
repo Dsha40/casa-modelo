@@ -6,7 +6,7 @@
 <title>Tienda · Dashboards ELDE</title>
 <link rel="stylesheet" href="/dashboards/shared/estilo.css">
 <link rel="stylesheet" href="/dashboards/shared/moderno.css">
-<link rel="stylesheet" href="/dashboards/tienda/estilo.css">
+<link rel="stylesheet" href="/dashboards/tienda/estilo.css?v=2026-10-12">
 </head>
 <body>
 <header>
@@ -17,6 +17,7 @@
     <a href="#hoy">Resumen</a>
     <a href="#curva-sec">Curva</a>
     <a href="#anaqueles-sec">Anaqueles</a>
+    <a href="#stock-sec">Stock</a>
     <a href="#personal-sec">Personal</a>
     <a href="#quien">Quién visita</a>
     <a href="#mapas">Mapas de calor</a>
@@ -81,6 +82,18 @@
   <div class="anq-camaras" id="anaqueles"><div class="vacio">sin datos de anaqueles — se llenan cuando una cámara transmite en modo Anaqueles con las áreas dibujadas</div></div>
 </section>
 
+<section id="stock-sec">
+  <h2>📦 Stock — revisar productos que se acaban</h2>
+  <p class="porque">Cada foto es el <b>ANTES</b> (la última foto del producto), el <b>AHORA</b> (justo después de que alguien cogió)
+    y <b>QUIÉN</b> cogió. <b>Bajada</b>: falta algo del producto (se cuenta y se rehace su foto).
+    <b>Cerca de vaciarse</b>: cada 8 bajadas desde la última foto de balda surtida.
+    <b>Posible agotado</b>: el hueco es casi total. Clic en una foto para ampliarla.
+    Las alertas activas se pierden si se reinicia el servidor; las fotos se quedan.</p>
+  <div class="chips" id="stock-filtros"></div>
+  <div class="stock-cuenta" id="stock-bajadas"></div>
+  <div class="galeria stock" id="stock"><div class="vacio">cargando…</div></div>
+</section>
+
 <section id="personal-sec">
   <h2>🪪 Personal de la tienda</h2>
   <p class="porque">El personal enrolado no cuenta en el marketing (ni visitas, ni agarres, ni mapas de calor):
@@ -138,7 +151,7 @@
 <script src="/dashboards/shared/util.js"></script>
 <script src="/dashboards/shared/ilustraciones.js"></script>
 <script src="/dashboards/shared/vlm.js"></script>
-<script src="/dashboards/tienda/app.js"></script>
+<script src="/dashboards/tienda/app.js?v=2026-10-12"></script>
 <script>montarBuscadorVLM('vlm', 'capturas', 'p. ej. ¿alguien lleva mochila?');</script>
 </body>
 </html>

@@ -62,3 +62,23 @@ def test_la_imagen_no_sale_de_su_carpeta(camara, archivo):
 def test_la_pagina_lleva_el_apartado():
     from src.app.dashboard import _HTML
     assert 'Stock — posible agotado' in _HTML and '/dashboard/api/stock' in _HTML
+
+
+def test_las_bajadas_salen_con_su_cambio_y_su_cuenta(tmp_path, monkeypatch):
+    """12-oct-2026: `..._bajada.jpg` y su `.json` (cambio y cuenta)."""
+    cam = _camara(tmp_path)
+    (cam / 'stock_alertas' / '2026-10-12_090000_1_1_bajada.jpg').write_bytes(b'\xff\xd8')
+    (cam / 'stock_alertas' / '2026-10-12_090000_1_1_bajada.json').write_text(
+        json.dumps({'tipo': 'bajada', 'cambio': 0.52, 'bajadas': 3}), encoding='utf-8')
+    monkeypatch.setattr(ds, '_activas', lambda: {})
+    h = ds.resumen_stock(tmp_path)['historial'][0]
+    assert h['tipo'] == 'bajada' and h['cambio'] == 0.52 and h['bajadas'] == 3
+    assert h['producto'] == 'colcafe' and h['activa'] is False
+
+
+def test_el_dashboard_de_tienda_lleva_el_apartado():
+    """El botón «Dashboard» del cliente abre /dashboards/tienda/, no
+    /dashboard: ahí tiene que estar el apartado (12-oct-2026)."""
+    raiz = Path(__file__).resolve().parents[2] / 'dashboards' / 'tienda'
+    assert 'id="stock-sec"' in (raiz / 'index.html').read_text(encoding='utf-8')
+    assert '/dashboard/api/stock' in (raiz / 'app.js').read_text(encoding='utf-8')

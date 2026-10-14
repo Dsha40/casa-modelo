@@ -266,3 +266,9 @@ td .delta { font-size: .78rem; }
 /* Perfil por pasillo: tabla chica dentro de su tarjeta. */
 #demo-pasillo table { font-size: .82rem; }
 #demo-pasillo small { color: var(--apagado); }
+
+/* Stock (12-oct-2026): fotos anchas antes | ahora | quién, sin recortar. */
+.galeria.stock { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+.galeria.stock img { height: auto; object-fit: contain; }
+.galeria.stock a.item.activa { border-color: #d0453e; }
+.stock-cuenta { font-size: .85rem; margin: .4rem 0 .8rem; color: var(--apagado); }
