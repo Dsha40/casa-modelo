@@ -38,6 +38,8 @@ import logging
 import time
 from typing import Any, Dict, List
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 #: Cada cuánto se escribe la línea del log por cámara.
@@ -45,6 +47,33 @@ PERIODO_S = 60.0
 
 # camera_id -> [descartadas, total, inicio del periodo]
 _cuentas: Dict[Any, List[float]] = {}
+
+
+def mascara(detecciones: Any, alto_min: Any, camera_id: Any = None) -> Any:
+    """True por cada detección con alto >= `alto_min` px (la que «vale»).
+    Sin umbral (0/None) o sin detecciones, todas valen. Nunca lanza: si algo
+    falla, todas valen (mejor contar de más que perder clientes).
+
+    Desde el 13-oct-2026 `tiendas.py` usa esto y NO `filtrar`: marca, deja
+    que ByteTrack siga a todos y quita detrás a quien NUNCA valió
+    (`filtro_memoria.py`). Borrar antes partía en dos a quien rondaba el
+    umbral (al agacharse o alejarse, su caja bajaba un instante)."""
+    try:
+        n = 0 if detecciones is None else len(detecciones)
+    except Exception:                                       # noqa: BLE001
+        n = 0
+    todas = np.ones(n, dtype=bool)
+    try:
+        alto_min = float(alto_min or 0)
+        if alto_min <= 0 or n == 0:
+            return todas
+        xyxy = detecciones.xyxy
+        valen = (xyxy[:, 3] - xyxy[:, 1]) >= alto_min
+        _anotar(camera_id, int((~valen).sum()), n, alto_min)
+        return valen
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("filtro_fondo: no se marcó (%s)", exc)
+        return todas
 
 
 def filtrar(detecciones: Any, alto_min: Any, camera_id: Any = None) -> Any:
@@ -55,10 +84,7 @@ def filtrar(detecciones: Any, alto_min: Any, camera_id: Any = None) -> Any:
         alto_min = float(alto_min or 0)
         if alto_min <= 0 or detecciones is None or len(detecciones) == 0:
             return detecciones
-        xyxy = detecciones.xyxy
-        altos = xyxy[:, 3] - xyxy[:, 1]
-        quedan = altos >= alto_min
-        _anotar(camera_id, int((~quedan).sum()), len(detecciones), alto_min)
+        quedan = mascara(detecciones, alto_min, camera_id)
         if quedan.all():
             return detecciones
         return detecciones[quedan]

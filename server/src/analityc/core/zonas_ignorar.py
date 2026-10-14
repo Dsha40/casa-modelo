@@ -72,7 +72,8 @@ def dentro_entera(caja: Any, poligono: np.ndarray) -> bool:
 def mascara(detecciones: Any, zonas: Any, camera_id: Any = None) -> Any:
     """True por cada detección que NO queda entera dentro de ningún área
     (la que «vale»). Sin áreas o sin detecciones, todas valen. Nunca lanza:
-    si algo falla, todas valen."""
+    si algo falla, todas valen. `tiendas.py` usa esto con
+    `filtro_memoria.py` (13-oct-2026): ver `filtro_fondo.mascara`."""
     try:
         n = 0 if detecciones is None else len(detecciones)
     except Exception:                                       # noqa: BLE001

@@ -63,12 +63,20 @@ def test_un_fallo_no_se_come_detecciones():
 
 
 def test_va_antes_del_seguimiento_y_detras_del_filtro_del_fondo():
+    """Desde el 13-oct-2026 MARCA (no borra) antes de ByteTrack; quien nunca
+    valió lo quita `filtro_memoria` detrás (test_filtro_memoria.py)."""
     src = (Path(__file__).resolve().parents[1] / 'src' / 'analityc' / 'core'
            / 'tiendas.py').read_text(encoding='utf-8')
-    i_fondo = src.index('filtro_fondo.filtrar(')
-    i_ign = src.index('zonas_ignorar.filtrar(', i_fondo)
+    i_fondo = src.index('filtro_fondo.mascara(')
+    i_ign = src.index('zonas_ignorar.mascara(', i_fondo)
     i_trk = src.index('self._byte_tracker.update_with_detections(', i_fondo)
     assert i_fondo < i_ign < i_trk
+
+
+def test_la_mascara_marca_lo_mismo_que_quitaba_el_filtro():
+    d = _det([[50, 50, 120, 250], [350, 100, 450, 400]])
+    assert zonas_ignorar.mascara(d, [FONDO], 'cam').tolist() == [False, True]
+    assert zonas_ignorar.mascara(d, None, 'cam').tolist() == [True, True]
 
 
 def test_llega_del_mensaje_al_procesador():

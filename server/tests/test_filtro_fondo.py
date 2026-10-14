@@ -70,10 +70,19 @@ def test_el_perfil_del_video_lo_activa_y_las_demas_camaras_no():
 
 
 def test_el_filtro_va_antes_del_seguimiento():
-    """Sobre el código: detectar -> filtro_fondo -> ByteTrack, en ese orden."""
+    """Sobre el código: detectar -> filtro_fondo (MARCA) -> ByteTrack, en ese
+    orden. Desde el 13-oct-2026 marca en vez de borrar; quien nunca valió lo
+    quita `filtro_memoria` detrás de ByteTrack (test_filtro_memoria.py)."""
     src = (Path(__file__).resolve().parents[1] / 'src' / 'analityc' / 'core'
            / 'tiendas.py').read_text(encoding='utf-8')
     i_det = src.index('deteccion_compartida.detectar_sv(')
-    i_fil = src.index('filtro_fondo.filtrar(', i_det)
+    i_fil = src.index('filtro_fondo.mascara(', i_det)
     i_trk = src.index('self._byte_tracker.update_with_detections(', i_det)
     assert i_det < i_fil < i_trk
+
+
+def test_la_mascara_marca_lo_mismo_que_quitaba_el_filtro():
+    det = _det([120, 234, 235, 400])
+    assert filtro_fondo.mascara(det, 235, 'cam').tolist() == [False, False, True, True]
+    assert filtro_fondo.mascara(det, 0, 'cam').tolist() == [True] * 4
+    assert filtro_fondo.mascara(object(), 235, 'cam').tolist() == []

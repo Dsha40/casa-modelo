@@ -26,6 +26,7 @@ from ..config.config import (
 from . import deteccion_compartida
 from . import demografia_aplazada
 from . import filtro_fondo
+from . import filtro_memoria
 from . import zonas_ignorar
 from . import ritmo_imagenes
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
@@ -2312,19 +2313,22 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     # RFDETR_* del modulo compartido, no PERSON_DETECT_IMGSZ.
                     sv_det = deteccion_compartida.detectar_sv(
                         inference_image, conf_min=_per_conf, clases=[0])
-                    # Gente del FONDO fuera, ANTES de ByteTrack: lo que se
-                    # quita aqui no genera seguimiento, ficha, entrada,
-                    # demografia, anaqueles ni calor (`filtro_fondo.py`).
-                    # El umbral es del perfil de ESTA camara; global = 0.
-                    sv_det = filtro_fondo.filtrar(
-                        sv_det, getattr(_cfg_cam, 'PERSON_MIN_HEIGHT_PX', 0),
-                        camera_id)
-                    # Areas a ignorar del recuadro (12-oct-2026,
-                    # `zonas_ignorar.py`): quien queda con la caja ENTERA
-                    # dentro tampoco llega a ByteTrack.
-                    sv_det = zonas_ignorar.filtrar(
-                        sv_det, getattr(self, '_zonas_ignorar', None),
-                        camera_id)
+                    # Gente del FONDO (`filtro_fondo.py`; umbral del perfil
+                    # de ESTA camara, global = 0) y areas a ignorar del
+                    # recuadro (`zonas_ignorar.py`): desde el 13-oct-2026 se
+                    # MARCAN, no se borran. ByteTrack sigue a todos y detras
+                    # `filtro_memoria` quita a quien NUNCA valio: el fondo
+                    # sigue sin generar seguimiento visible, ficha, entrada,
+                    # demografia, anaqueles ni calor, y quien rondaba el
+                    # umbral ya no se parte en dos numeros.
+                    sv_det = filtro_memoria.marcar(sv_det, (
+                        filtro_fondo.mascara(
+                            sv_det,
+                            getattr(_cfg_cam, 'PERSON_MIN_HEIGHT_PX', 0),
+                            camera_id)
+                        & zonas_ignorar.mascara(
+                            sv_det, getattr(self, '_zonas_ignorar', None),
+                            camera_id)))
 
                     # ── Tracking de corto plazo con sv.ByteTrack ──
                     # El tracking lo hace ByteTrack (no un tracker interno del
@@ -2341,6 +2345,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     ritmo_imagenes.ajustar_bytetrack(
                         self._byte_tracker, time.time(), _cfg_cam)
                     sv_det = self._byte_tracker.update_with_detections(sv_det)
+                    sv_det = filtro_memoria.filtrar(
+                        self._byte_tracker, sv_det, camera_id)
 
                     # ── Conteo de zona (sv.PolygonZone) — Hito 2 ──
                     # Aforo INSTANTANEO: cuantas personas estan DENTRO del area
