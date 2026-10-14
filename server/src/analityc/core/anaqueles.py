@@ -1847,6 +1847,10 @@ class Anaqueles(TiendasProcess):
         imagen, metadata = super().process_frame(
             image, roi=roi, activate_roi=activate_roi, camera_id=camera_id,
             heatmap_activate=heatmap_activate)
+        # Imagen congelada de un corte de iVMS (`cortes_video.py`, opcional):
+        # nada que medir y el reloj de las baldas tampoco corre.
+        if isinstance(metadata, dict) and metadata.get('congelado'):
+            return imagen, metadata
 
         try:
             bloque = self._medir_anaqueles(image, camera_id)

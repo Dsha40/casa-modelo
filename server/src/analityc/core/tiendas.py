@@ -23,6 +23,7 @@ from ..config.config import (
 # COMPARTIDO del proceso. `detectar_sv` devuelve sv.Detections con class_id
 # en el espacio de siempre (0 = persona), asi que ByteTrack, PolygonZone,
 # demografia y heatmap siguen intactos aguas abajo.
+from . import cortes_video
 from . import deteccion_compartida
 from . import demografia_aplazada
 from . import filtro_fondo
@@ -2272,6 +2273,17 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             self._camera_id_actual = camera_id
 
             try:
+                # Cortes de video de iVMS (13-oct-2026, `cortes_video.py`).
+                # OPCIONAL (ELDE_CONGELAR_CORTES=1): la MISMA imagen exacta
+                # 0,4 s o mas = iVMS sin video; se responde sin procesar y
+                # no corre el reloj de nadie (ByteTrack no avanza).
+                if cortes_video.activo():
+                    cam_state['_camera_id'] = camera_id
+                    if cortes_video.congelada(
+                            cam_state, image, time.time(),
+                            getattr(self, '_demographics', None),
+                            getattr(self, '_byte_tracker', None)):
+                        return image, cortes_video.metadata_congelada(cam_state)
                 self.frame_counter += 1
                 self.last_processed_frame = image.copy()
 
@@ -2654,6 +2666,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 # visitantes de un stand que no esta midiendo. Un modo propio
                 # hace la eleccion explicita.
 
+                cortes_video.recordar(cam_state, metadata)
                 return processed_image, metadata
             except Exception as e:
                 logger.error(f"Error procesando frame: {e}")

@@ -687,6 +687,10 @@ class AnalyticsConfig:
     # si alguna lectura tuvo CARA (en vivo acertaba el 97 %), 95 % si solo
     # cuerpo (93 %). Antes, 95 % para todo. Ver `clasificador_b.py`.
     DEMO_B_SEGURIDAD_CON_CARA: float = 0.90
+    # Pausar el seguimiento durante los cortes de video de iVMS (13-oct-2026,
+    # `cortes_video.py`). APAGADO por decision del usuario («que sea algo
+    # opcional por los momentos»); tambien con ELDE_CONGELAR_CORTES=1.
+    CONGELAR_EN_CORTES: bool = False
     DEMO_B_SEGURIDAD: float = 0.95
 
     # Taxonomia GRUESA de edad para resultados solo-corporales (age_source=body)
