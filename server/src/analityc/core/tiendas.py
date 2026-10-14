@@ -2333,14 +2333,11 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     # sigue sin generar seguimiento visible, ficha, entrada,
                     # demografia, anaqueles ni calor, y quien rondaba el
                     # umbral ya no se parte en dos numeros.
-                    sv_det = filtro_memoria.marcar(sv_det, (
+                    sv_det = filtro_memoria.marcar(sv_det,
                         filtro_fondo.mascara(
                             sv_det,
                             getattr(_cfg_cam, 'PERSON_MIN_HEIGHT_PX', 0),
-                            camera_id)
-                        & zonas_ignorar.mascara(
-                            sv_det, getattr(self, '_zonas_ignorar', None),
-                            camera_id)))
+                            camera_id))
 
                     # ── Tracking de corto plazo con sv.ByteTrack ──
                     # El tracking lo hace ByteTrack (no un tracker interno del
@@ -2359,6 +2356,13 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     sv_det = self._byte_tracker.update_with_detections(sv_det)
                     sv_det = filtro_memoria.filtrar(
                         self._byte_tracker, sv_det, camera_id)
+                    # Areas a ignorar SIN memoria (14-oct-2026): quien
+                    # queda entero dentro no cuenta aunque antes valiera.
+                    # Con memoria se colaban (727 cajas en un minuto en el
+                    # video: gente que paso por delante y se quedo al fondo).
+                    sv_det = zonas_ignorar.filtrar(
+                        sv_det, getattr(self, '_zonas_ignorar', None),
+                        camera_id)
 
                     # ── Conteo de zona (sv.PolygonZone) — Hito 2 ──
                     # Aforo INSTANTANEO: cuantas personas estan DENTRO del area

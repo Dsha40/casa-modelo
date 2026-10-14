@@ -62,15 +62,15 @@ def test_un_fallo_no_se_come_detecciones():
     assert zonas_ignorar.filtrar(raro, [FONDO], 'cam') is raro
 
 
-def test_va_antes_del_seguimiento_y_detras_del_filtro_del_fondo():
-    """Desde el 13-oct-2026 MARCA (no borra) antes de ByteTrack; quien nunca
-    valió lo quita `filtro_memoria` detrás (test_filtro_memoria.py)."""
+def test_va_detras_del_seguimiento_y_sin_memoria():
+    """14-oct-2026: con memoria se colaba gente del fondo que antes paso por
+    delante; ahora quita a quien queda entero dentro, siempre."""
     src = (Path(__file__).resolve().parents[1] / 'src' / 'analityc' / 'core'
            / 'tiendas.py').read_text(encoding='utf-8')
-    i_fondo = src.index('filtro_fondo.mascara(')
-    i_ign = src.index('zonas_ignorar.mascara(', i_fondo)
-    i_trk = src.index('self._byte_tracker.update_with_detections(', i_fondo)
-    assert i_fondo < i_ign < i_trk
+    i_mem = src.index('filtro_memoria.filtrar(')
+    i_ign = src.index('zonas_ignorar.filtrar(', i_mem)
+    assert 'zonas_ignorar.mascara(' not in src
+    assert i_mem < i_ign
 
 
 def test_la_mascara_marca_lo_mismo_que_quitaba_el_filtro():

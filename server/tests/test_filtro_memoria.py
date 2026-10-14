@@ -76,17 +76,6 @@ def test_el_fondo_nunca_cuenta():
         assert len(r) == 0
 
 
-def test_el_area_a_ignorar_tambien_tiene_memoria():
-    """Quien estuvo FUERA del área y entra entera en ella sigue contando;
-    quien siempre estuvo dentro, no."""
-    zona = [[[0, 0], [400, 0], [400, 600], [0, 600]]]
-    bt = _tracker()
-    for i in range(20):
-        x = 450 - 10 * i                                    # entra en el área
-        r = _paso(bt, [[x, 200, x + 60, 500], [50, 250, 110, 520]], zonas=zona)
-        assert len(r) == 1                                  # solo el que vino de fuera
-
-
 def test_sin_marca_todo_pasa_y_un_fallo_no_deja_pasar_al_fondo():
     det = _det([[0, 0, 10, 10]])
     assert filtro_memoria.filtrar(_tracker(), det) is det   # sin marca
@@ -106,4 +95,5 @@ def test_tiendas_marca_antes_y_filtra_despues_del_seguimiento():
     i_filtra = src.index('filtro_memoria.filtrar(', i_det)
     assert i_det < i_marca < i_trk < i_filtra
     assert src.index('filtro_fondo.mascara(', i_det) < i_trk
-    assert src.index('zonas_ignorar.mascara(', i_det) < i_trk
+    # Las areas a ignorar, sin memoria y detras (14-oct-2026).
+    assert src.index('zonas_ignorar.filtrar(', i_filtra) > i_filtra
