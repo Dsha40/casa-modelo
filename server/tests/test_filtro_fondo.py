@@ -61,11 +61,11 @@ def test_el_perfil_del_video_lo_activa_y_las_demas_camaras_no():
     clave nueva no se descarta como desconocida."""
     from src.analityc.core.analytics.demographics import _load_camera_profile
     video = _load_camera_profile('win-Media_Player-c3-i58bf7b')
-    assert video.PERSON_MIN_HEIGHT_PX == 235
+    assert video.PERSON_MIN_HEIGHT_PX == 180       # 235 hasta el 12-oct-2026
     # La cámara 3 en vivo tiene su propio perfil desde el 6-oct (200 px;
     # 220 desde el 9-oct, pedido por el usuario); una cámara sin perfil
     # sigue sin filtro.
-    assert _load_camera_profile('win-iVMS-4200-c3-i58bf7b').PERSON_MIN_HEIGHT_PX == 220
+    assert _load_camera_profile('win-iVMS-4200-c3-i58bf7b').PERSON_MIN_HEIGHT_PX == 150  # 220 hasta el 12-oct-2026
     assert _load_camera_profile('win-iVMS-4200-c4-i58bf7b').PERSON_MIN_HEIGHT_PX == 0
 
 

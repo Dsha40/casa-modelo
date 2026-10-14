@@ -1,6 +1,6 @@
 {
   "_descripcion": "Captura de la ventana de Media Player con la grabacion del 23-sep de la camara 3 (pasillo de las baldas de cafe). Es la fuente de PRUEBA, no la tienda en vivo: la imagen tiene otro tamano que la de iVMS, asi que sus pixeles no valen para win-iVMS-4200-c3.",
 
-  "_nota_fondo": "2-oct-2026: el usuario midio con la regla del cliente (menu Vista) que la gente del FONDO, que no esta en el pasillo, mide menos de 235 px de alto en esta imagen, y pidio no tenerla en cuenta. Se descarta justo despues del detector (filtro_fondo.py): no deja seguimiento, ficha, entrada, demografia, anaqueles ni calor. Para la camara 3 en vivo hay que medir en iVMS y crear su propio perfil.",
-  "PERSON_MIN_HEIGHT_PX": 235
+  "_nota_fondo": "2-oct-2026: el usuario midio con la regla del cliente (menu Vista) que la gente del FONDO, que no esta en el pasillo, mide menos de 235 px de alto en esta imagen, y pidio no tenerla en cuenta. Se descarta justo despues del detector (filtro_fondo.py): no deja seguimiento, ficha, entrada, demografia, anaqueles ni calor. Para la camara 3 en vivo hay que medir en iVMS y crear su propio perfil. 12-oct-2026: bajado a 180 px a peticion del usuario, ahora que el fondo que se cuela se quita con las areas a ignorar dibujadas en el recuadro (zonas_ignorar.py): con 235 se perdia a gente de delante de la camara que se ve cortada.",
+  "PERSON_MIN_HEIGHT_PX": 180
 }
