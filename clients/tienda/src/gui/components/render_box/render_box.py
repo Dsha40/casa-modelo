@@ -183,6 +183,9 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                  # Productos dibujados DENTRO de las areas (25-sep-2026):
                  # `ProductosAnaquel.a_lista()` tal como se guardo.
                  anaqueles_productos=None,
+                 # Áreas a ignorar (12-oct-2026, `areas_ignorar.py`).
+                 zonas_ignorar=None,
+                 zonas_ignorar_boolean=False,
                  vlm_enabled_boolean=False,
                  heatmap_boolean=False,
                  trace_boolean=True,
@@ -265,6 +268,8 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         # Productos dentro de las areas (25-sep-2026). Los edita el lienzo;
         # aqui solo se guardan para restaurarlos al abrir.
         self.anaqueles_productos     = list(anaqueles_productos or [])
+        self.zonas_ignorar           = list(zonas_ignorar or [])
+        self.zonas_ignorar_boolean   = bool(zonas_ignorar_boolean)
         # ETAPA 2 — toggle VLM
         self.vlm_enabled_boolean     = bool(vlm_enabled_boolean)
         self.callback_save_data      = callback_save_data
@@ -424,11 +429,14 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             anaqueles_activate=self.anaqueles_boolean,
             anaqueles_etiquetas=self.anaqueles_nombres,
             anaqueles_productos=self.anaqueles_productos,
+            zonas_ignorar=self.zonas_ignorar,
+            zonas_ignorar_activate=self.zonas_ignorar_boolean,
             **self.kwargs_puerta(),
         )
         self.imagen_label.point_change.connect(self.save_point)
         self.imagen_label.anaqueles_change.connect(self.save_anaqueles)
         self.imagen_label.productos_change.connect(self.save_productos)
+        self.imagen_label.ignorar_change.connect(self.save_ignorar)
         self.conectar_puerta(self.imagen_label)
         # La regla mide en píxeles de la imagen que se manda al servidor
         # (`image_w`/`image_h` los actualiza cada frame), no en los de la
@@ -655,6 +663,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
                     # por la ruta de ventana (`render_box_captura`).
                     "anaqueles_productos": self.imagen_label
                                                .get_productos_coordinates(w, h),
+                    # Areas a ignorar (12-oct-2026). Tambien por la ruta de
+                    # ventana (`render_box_captura`).
+                    "zonas_ignorar": self.imagen_label
+                                         .get_ignorar_coordinates(w, h),
                     # Umbral de cruce dibujado con la puerta direccional:
                     # [[x1,y1],[x2,y2]] en pixeles; DENTRO —el lado de la
                     # cabeza verde ENTRADA— a la derecha de P1→P2. Viaja
@@ -1069,6 +1081,12 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         self._save_all("anaqueles_boolean", self.anaqueles_boolean)
 
     # ── Productos dentro de las areas (25-sep-2026) ──────────────────────
+    def save_ignorar(self, areas, activo):
+        self.zonas_ignorar = areas
+        self.zonas_ignorar_boolean = bool(activo)
+        self._save_all("zonas_ignorar", areas)
+        self._save_all("zonas_ignorar_boolean", self.zonas_ignorar_boolean)
+
     def save_productos(self, productos):
         self.anaqueles_productos = productos
         self._save_all("anaqueles_productos", productos)
@@ -1318,6 +1336,18 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
         productos.setStyleSheet(self._MENU_QSS)
         productos.setEnabled(n > 0)
         self._build_productos_menu(productos)
+        menu.addSeparator()
+        # Areas a ignorar (12-oct-2026): quien queda ENTERO dentro no se
+        # cuenta (gente del fondo que no esta en el pasillo).
+        ign = self.imagen_label.ignorar
+        self._add_toggle(menu, f"Areas a ignorar ({len(ign.areas)})",
+                         ign.activa, lambda: self.imagen_label.toggle_ignorar())
+        menu.addAction("Añadir area a ignorar (fondo)",
+                       lambda *_: self.imagen_label.agregar_ignorar())
+        quitar_ign = menu.addAction(
+            "Quitar ultima area a ignorar",
+            lambda *_: self.imagen_label.quitar_ignorar())
+        quitar_ign.setEnabled(bool(ign.areas))
         menu.addSeparator()
         # La puerta tiene ADEMAS su boton en la barra (es lo que se busca al
         # calibrar); aqui se repite para quien venga al menu de ROI

@@ -220,6 +220,10 @@ class FrameInference(BaseModel):
     #: frames por él: `validacion_contrato` deja pasar los campos que no
     #: conoce (desde el 7-sep) y solo los apunta en el log.
     anaqueles_productos: Optional[List[ProductoAnaquel]] = None
+    #: Áreas a ignorar (12-oct-2026): quien queda con la caja ENTERA dentro
+    #: no se cuenta para nada. En píxeles del frame enviado. Ausente o
+    #: vacía = no se ignora nada.
+    zonas_ignorar: Optional[List[Poligono]] = None
 
     # ── Puertas: N umbrales con nombre, uno por acceso (7-sep-2026) ──
     # Cada puerta es un SEGMENTO `[[x1,y1],[x2,y2]]` en pixeles del frame,

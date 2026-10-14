@@ -440,6 +440,12 @@ class CapturaDVRMixin:
             if productos is not None:
                 salida["anaqueles_productos"] = productos(self.image_w,
                                                           self.image_h)
+        # Áreas a ignorar (12-oct-2026): FUERA del bloque de anaqueles, valen
+        # en cualquier modo. Con `getattr`: la etiqueta de otro cliente puede
+        # no tenerlas.
+        ignorar = getattr(etiqueta, 'get_ignorar_coordinates', None)
+        if ignorar is not None:
+            salida["zonas_ignorar"] = ignorar(self.image_w, self.image_h)
         # Umbral de cruce (puerta direccional / línea, 7-sep-2026). Es el
         # MISMO hueco que ya se pagó dos veces: los dos constructores de
         # payload —este y el del `render_box` del cliente— tienen que mandar

@@ -254,6 +254,10 @@ class MainWindow(QMainWindow):
                 anaqueles_numeros          = cfg.get("anaqueles_numeros", []),
                 # Productos dibujados dentro de las areas (25-sep-2026).
                 anaqueles_productos        = cfg.get("anaqueles_productos", []),
+                # Areas a ignorar (12-oct-2026).
+                zonas_ignorar              = cfg.get("zonas_ignorar", []),
+                zonas_ignorar_boolean      = cfg.get("zonas_ignorar_boolean",
+                                                     False),
                 # Munecas del anaquel: ayuda de calibracion, apagada por
                 # defecto y persistida por camara como el resto de la vista.
                 munecas_boolean            = cfg.get("munecas_boolean", False),

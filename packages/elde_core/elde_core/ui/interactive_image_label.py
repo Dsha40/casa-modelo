@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QLabel
 from PySide6.QtCore import Qt, QPoint, Signal
 from PySide6.QtGui import QPixmap, QMouseEvent, QPainter, QBrush, QPen, QColor
 
+from .areas_ignorar import AreasIgnorar
 from .flecha_direccion import INDICE_MEDIO, FlechaDireccion
 from .linea_cruce import LineaCruce
 from .productos_anaquel import ProductosAnaquel
@@ -49,6 +50,9 @@ class Interactive_imageLabel(QLabel):
     # anaqueles: `point_change` tiene seis argumentos y la usan los cuatro
     # clientes; anadirle un septimo los rompe a todos de golpe.
     personal_change = Signal(list, bool)
+    # Áreas a ignorar (12-oct-2026, `areas_ignorar.py`): lista de áreas en
+    # 0..1000 + activo. Señal PROPIA por la misma razón que las demás.
+    ignorar_change = Signal(list, bool)
 
     def __init__(self, parent=None,
                  roi=None,
@@ -163,6 +167,13 @@ class Interactive_imageLabel(QLabel):
         # no significa nada, y el servidor tampoco lo recibe.
         self.productos = ProductosAnaquel(kwargs.get('anaqueles_productos'))
         self._prod_arrastre = None   # (producto, esquina) agarrada
+
+        # Áreas a ignorar (12-oct-2026): quien queda entero dentro no se
+        # cuenta en el servidor. Lógica en `areas_ignorar.py`.
+        self.ignorar = AreasIgnorar(
+            kwargs.get('zonas_ignorar'),
+            kwargs.get('zonas_ignorar_activate', False))
+        self._ign_arrastre = None    # (área, esquina) agarrada
 
         # Regla manual para medir en píxeles de la imagen (2-oct-2026). Su
         # lógica vive en `regla_pixeles.py`. Nace apagada; mientras está
@@ -378,6 +389,32 @@ class Interactive_imageLabel(QLabel):
         self.anaqueles_change.emit(self.anaqueles_a_lista(),
                                    self.anaqueles_active)
 
+    # ── Áreas a ignorar (12-oct-2026) ────────────────────────────────
+    def toggle_ignorar(self, state: bool = None):
+        self.ignorar.activa = (not self.ignorar.activa if state is None
+                               else bool(state))
+        self._ign_arrastre = None
+        self.update()
+        self._emitir_ignorar()
+
+    def agregar_ignorar(self):
+        self.ignorar.agregar()
+        self.update()
+        self._emitir_ignorar()
+
+    def quitar_ignorar(self):
+        if self.ignorar.quitar_ultima():
+            self._ign_arrastre = None
+            self.update()
+            self._emitir_ignorar()
+
+    def get_ignorar_coordinates(self, image_width: int, image_height: int):
+        """Áreas a ignorar en píxeles del frame; VACÍA si están apagadas."""
+        return self.ignorar.coordenadas_pixel(image_width, image_height)
+
+    def _emitir_ignorar(self):
+        self.ignorar_change.emit(self.ignorar.a_lista(), self.ignorar.activa)
+
     # ── Zona del personal (modo comedor) ─────────────────────────────
     def _emitir_personal(self):
         self.personal_change.emit(self.qpoints_to_list(self.personal_zone),
@@ -548,7 +585,8 @@ class Interactive_imageLabel(QLabel):
         any_visible = (self.show_points or self.order_zone_active
                        or self.delivery_zone_active or self.personal_zone_active
                        or self.flecha.activa or self.puerta.activa
-                       or self.linea.activa or self.anaqueles_active)
+                       or self.linea.activa or self.anaqueles_active
+                       or self.ignorar.activa)
         if not any_visible:
             return
         if self.width() < 1 or self.height() < 1 or self.current_pixmap.isNull():
@@ -588,6 +626,11 @@ class Interactive_imageLabel(QLabel):
         if self.personal_zone_active:
             self._draw_polygon(painter, self.personal_zone, _GRIS, _GRIS,
                                'personal', "Personal")
+
+        # Áreas a ignorar (rojo oscuro, discontinuo), debajo de los
+        # anaqueles: son fondo.
+        self.ignorar.pintar(painter, self._escalar_xy,
+                            activo=self._ign_arrastre)
 
         # Areas de anaquel (naranja, numeradas): un cuadrilatero por nivel.
         if self.anaqueles_active:
@@ -647,7 +690,8 @@ class Interactive_imageLabel(QLabel):
         return (self.show_points or self.order_zone_active
                 or self.delivery_zone_active or self.personal_zone_active
                 or self.flecha.activa or self.puerta.activa
-                or self.linea.activa or self.anaqueles_active)
+                or self.linea.activa or self.anaqueles_active
+                or self.ignorar.activa)
 
     def _vertice_en(self, pos):
         """`(conjunto, indice)` del vertice de poligono bajo `pos`, o `None`.
@@ -688,6 +732,8 @@ class Interactive_imageLabel(QLabel):
             return True
         if self._anq_vertice_en(pos) is not None:
             return True
+        if self.ignorar.vertice_en(pos, self._escalar_xy) is not None:
+            return True
         for pts, activo in ((self.points, self.show_points),
                             (self.order_zone, self.order_zone_active),
                             (self.delivery_zone, self.delivery_zone_active),
@@ -705,7 +751,8 @@ class Interactive_imageLabel(QLabel):
     def arrastrando_punto(self) -> bool:
         """Hay un arrastre de punto en curso."""
         return (self.active_point_index != -1 or self.flecha_index != -1
-                or self._anq_vert != -1 or self._prod_arrastre is not None)
+                or self._anq_vert != -1 or self._prod_arrastre is not None
+                or self._ign_arrastre is not None)
 
     def mousePressEvent(self, event: QMouseEvent):
         # La regla, lo PRIMERO y aunque no haya zonas activas: con ella
@@ -755,6 +802,11 @@ class Interactive_imageLabel(QLabel):
                 self._anq_area, self._anq_vert = anq
                 self.update()
                 return
+            ign = self.ignorar.vertice_en(event.pos(), self._escalar_xy)
+            if ign is not None:
+                self._ign_arrastre = ign
+                self.update()
+                return
             if idx == INDICE_MEDIO:
                 self._gadget_press = gadget
                 self.flecha_index = idx
@@ -801,6 +853,14 @@ class Interactive_imageLabel(QLabel):
             new_pos.setY(max(0, min(new_pos.y(), self.height())))
             perc = self.get_percentage_point(new_pos)
             self.productos.mover(*self._prod_arrastre, perc.x(), perc.y())
+            self.update()
+            return super().mouseMoveEvent(event)
+        if self._ign_arrastre is not None and event.buttons() & Qt.LeftButton:
+            new_pos = event.pos()
+            new_pos.setX(max(0, min(new_pos.x(), self.width())))
+            new_pos.setY(max(0, min(new_pos.y(), self.height())))
+            perc = self.get_percentage_point(new_pos)
+            self.ignorar.mover(*self._ign_arrastre, perc.x(), perc.y())
             self.update()
             return super().mouseMoveEvent(event)
         if self._anq_vert != -1 and event.buttons() & Qt.LeftButton:
@@ -877,6 +937,11 @@ class Interactive_imageLabel(QLabel):
             self._prod_arrastre = None
             self.update()
             self._emitir_productos()
+            return super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton and self._ign_arrastre is not None:
+            self._ign_arrastre = None
+            self.update()
+            self._emitir_ignorar()
             return super().mouseReleaseEvent(event)
         if event.button() == Qt.LeftButton and self._anq_vert != -1:
             self._anq_area = self._anq_vert = -1

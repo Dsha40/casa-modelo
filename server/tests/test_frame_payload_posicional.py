@@ -44,11 +44,11 @@ APP = RAIZ / 'server' / 'src' / 'app' / 'app.py'
 #: umbrales de permanencia (19-ago-2026), el rótulo del utensilio con el que
 #: se dibujó el umbral, las tres piezas de las PUERTAS —N umbrales con
 #: nombre, uno por sitio— (7-sep-2026) y los PRODUCTOS dibujados dentro de
-#: las áreas del anaquel (25-sep-2026).
+#: las áreas del anaquel (25-sep-2026) y las ÁREAS A IGNORAR (12-oct-2026).
 ULTIMOS = ('min_permanencia_personas', 'min_permanencia_vehiculos',
            'linea_cruce_estilo',
            'puertas_lineas', 'puertas_nombres', 'puertas_activate',
-           'anaqueles_productos')
+           'anaqueles_productos', 'zonas_ignorar')
 
 #: Dos puertas como las manda el recuadro: píxeles del frame, 2 puntos por
 #: umbral, la POSICIÓN en la lista es la identidad de cada puerta.
@@ -345,7 +345,8 @@ def test_las_puertas_NO_entran_en_el_estado_que_tiendas_multiplexa():
     multiplexados = {n.value for n in ast.walk(push)
                      if isinstance(n, ast.Constant) and isinstance(n.value, str)}
     for atributo in ('_puertas_lineas', '_puertas_nombres',
-                     '_puertas_activate', '_gestor_puertas'):
+                     '_puertas_activate', '_gestor_puertas',
+                     '_zonas_ignorar'):
         assert atributo not in multiplexados, (
             f'{atributo} entró en el estado que _push_state multiplexa: cada '
             'frame lo dejará en None y el modo puertas quedará mudo sin un '

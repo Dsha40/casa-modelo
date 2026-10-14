@@ -25,6 +25,7 @@ from ..config.config import (
 # demografia y heatmap siguen intactos aguas abajo.
 from . import deteccion_compartida
 from . import filtro_fondo
+from . import zonas_ignorar
 from . import ritmo_imagenes
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
@@ -2293,6 +2294,12 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     # El umbral es del perfil de ESTA camara; global = 0.
                     sv_det = filtro_fondo.filtrar(
                         sv_det, getattr(_cfg_cam, 'PERSON_MIN_HEIGHT_PX', 0),
+                        camera_id)
+                    # Areas a ignorar del recuadro (12-oct-2026,
+                    # `zonas_ignorar.py`): quien queda con la caja ENTERA
+                    # dentro tampoco llega a ByteTrack.
+                    sv_det = zonas_ignorar.filtrar(
+                        sv_det, getattr(self, '_zonas_ignorar', None),
                         camera_id)
 
                     # ── Tracking de corto plazo con sv.ByteTrack ──

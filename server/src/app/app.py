@@ -704,6 +704,9 @@ def process_image_sync(
     # lista de `{anaquel, nombre, poligono}`. AL FINAL por lo mismo que las
     # puertas: `frame_payload` es posicional. Solo lo lee Anaqueles.
     anaqueles_productos: Any = None,
+    # Áreas a ignorar (12-oct-2026): quien queda entero dentro no se
+    # cuenta (`zonas_ignorar.py`). AL FINAL: `frame_payload` es posicional.
+    zonas_ignorar: Any = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     Despacha el frame al procesador correcto.
@@ -861,6 +864,7 @@ def process_image_sync(
             # Productos del anaquel (25-sep-2026): en LAS DOS ramas, por el
             # mismo motivo que las puertas.
             cam_proc._anaqueles_productos = anaqueles_productos
+            cam_proc._zonas_ignorar = zonas_ignorar
             return cam_proc.process_frame(img, roi, roi_activate, camera_id, heatmap_activate=heatmap_activate)
         except Exception:
             if camera_angle:
@@ -883,6 +887,7 @@ def process_image_sync(
             processor._puertas_nombres = puertas_nombres
             processor._puertas_activate = bool(puertas_activate)
             processor._anaqueles_productos = anaqueles_productos
+            processor._zonas_ignorar = zonas_ignorar
             return processor.process_frame(img, roi, roi_activate, camera_id, heatmap_activate=heatmap_activate)
 
     # HummusProcess: ROI personas (amarillo) + zonas Toma_De_Orden (azul) y Entrega_De_Plato (rojo)
@@ -1096,6 +1101,8 @@ def _full_frame_sync(
     # Productos del anaquel (25-sep-2026). AL FINAL, y en el mismo orden que
     # en la tupla y en `process_image_sync`.
     anaqueles_productos: Any = None,
+    # Áreas a ignorar (12-oct-2026). AL FINAL, como los productos.
+    zonas_ignorar: Any = None,
 ) -> Dict[str, Any]:
     """
     Combina decode + inferencia + encode JPEG en una sola llamada al executor.
@@ -1135,6 +1142,7 @@ def _full_frame_sync(
         puertas_nombres=puertas_nombres,
         puertas_activate=puertas_activate,
         anaqueles_productos=anaqueles_productos,
+        zonas_ignorar=zonas_ignorar,
     )
     # Mapa de calor GLOBAL (1-ago-2026): TODAS las camaras acumulan, no solo
     # el pipeline de visitantes. Come las cajas del MISMO metadata que viaja
@@ -1354,6 +1362,8 @@ async def websocket_endpoint(websocket: WebSocket, type_inference: str):
             # reparten los agarres del área. Ausente = conteo por área de
             # siempre.
             anaqueles_productos = data.get("anaqueles_productos") or None
+            # Áreas a ignorar (12-oct-2026). Ausente = no se ignora nada.
+            zonas_ignorar = data.get("zonas_ignorar") or None
 
             # Compatibilidad: door_direction_activate como lista de puntos
             if isinstance(door_direction_activate, (list, tuple)) and door_direction is None:
@@ -1480,6 +1490,7 @@ async def websocket_endpoint(websocket: WebSocket, type_inference: str):
                 puertas_nombres,
                 puertas_activate,
                 anaqueles_productos,
+                zonas_ignorar,
             )
 
             # El lector SOLO encola y vuelve a leer. Antes esperaba aqui el
