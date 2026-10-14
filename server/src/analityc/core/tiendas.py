@@ -1888,6 +1888,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 track['persistent_id'] = uid
                 track['persistent_confirmed'] = True
                 track['identity_source'] = 'face'
+                reid.anotar_identidad(tid, uid)
                 # PERSONAL enrolado: se marca en el track (para que los
                 # modos y el heatmap lo salten) y NO cuenta como visitante.
                 # OJO: si el UNIFORME ya lo marco (racha corporal), el que
@@ -1933,6 +1934,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 track['persistent_id'] = matched
                 track['persistent_confirmed'] = True
                 track['identity_source'] = 'body'
+                if reid_ok:
+                    reid.anotar_identidad(tid, matched)
                 _ficha_per = self._ficha_personal_tienda(matched)
                 if _ficha_per is not None:
                     track['es_personal'] = True

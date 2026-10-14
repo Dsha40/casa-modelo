@@ -64,6 +64,17 @@ logger = logging.getLogger(__name__)
 _GENEROS_VOTABLES = ('Hombre', 'Mujer')
 
 
+def _conservar_identidad() -> bool:
+    """14-oct-2026: un numero que ya tenia identidad no estrena otra si su
+    cara no coincide. Apagar con ELDE_REID_CONSERVAR=0 o
+    AnalyticsConfig.REID_CONSERVAR_IDENTIDAD = False."""
+    import os
+    v = os.environ.get('ELDE_REID_CONSERVAR', '').strip().lower()
+    if v:
+        return v not in ('0', 'false', 'no', 'off')
+    return bool(getattr(AnalyticsConfig, 'REID_CONSERVAR_IDENTIDAD', True))
+
+
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity entre dos vectores (sin asumir normalizados)."""
     a_norm = a / max(np.linalg.norm(a), 1e-9)
@@ -206,6 +217,10 @@ class FaceReidentifier:
         self._db: Dict[str, Dict[str, Any]] = {}
         # Mapping track_id -> person_uuid (solo en memoria, no persistido)
         self._track_to_person: Dict[int, str] = {}
+        #: Identidad que ya tuvo cada numero de seguimiento (por cara o por
+        #: cuerpo), aunque su mapeo se haya limpiado (14-oct-2026,
+        #: `conservar_identidad`): track_id -> (uid, ts).
+        self._identidad_previa: Dict[int, Tuple[str, float]] = {}
         # Namespace numerico por camara: como el reidentificador es COMPARTIDO
         # entre camaras y los track_id son locales a cada camara (ByteTrack
         # empieza en 1 en cada una), sin esto los track_id colisionarian en
@@ -744,6 +759,24 @@ class FaceReidentifier:
                 self._save_throttled()
                 return best_uid, False, dict(rec)
 
+            # No match, pero ESTE numero ya era alguien (14-oct-2026, lo pidio
+            # el usuario): una cara vista de lado no le inventa otra
+            # identidad. El 14-oct, de 123 identidades nuevas, al menos 5
+            # cayeron sobre un numero que ya tenia una (la clienta de negro:
+            # 5af8954d y luego 14ef269d). NO se anade el embedding (podria
+            # ser una cara mala): solo se conserva la identidad.
+            previa = self._identidad_previa.get(int(track_id))
+            if (previa is not None and previa[0] in self._db
+                    and _conservar_identidad()):
+                uid = previa[0]
+                self._track_to_person[track_id] = uid
+                rec = self._db[uid]
+                rec['last_seen'] = time.time()
+                logger.info("REID conserva track=%s persona=%s (top sim=%.3f "
+                            "< %.2f: no se crea otra)", track_id, uid[:8],
+                            best_sim if best_uid else 0.0, self._sim_threshold)
+                return uid, False, dict(rec)
+
             # No match -> evaluar si crear nueva persona.
             # NO creamos registros nuevos desde caras de perfil porque
             # sus embeddings no matchearan con frontales de la misma
@@ -926,7 +959,19 @@ class FaceReidentifier:
         """Limpia el mapping track->person cuando un track termina.
         NO borra la persona de la DB (puede volver).
         """
-        self._track_to_person.pop(track_id, None)
+        uid = self._track_to_person.pop(track_id, None)
+        if uid:
+            self._identidad_previa[int(track_id)] = (uid, time.time())
+
+    def anotar_identidad(self, track_id: int, uid: Optional[str]) -> None:
+        """El numero `track_id` es `uid` (por cara o por cuerpo): si mas
+        tarde su cara no coincide con nadie, conserva esa identidad en vez
+        de crear otra (`conservar_identidad`, 14-oct-2026)."""
+        if uid and not str(uid).startswith('prov:'):
+            self._identidad_previa[int(track_id)] = (str(uid), time.time())
+            if len(self._identidad_previa) > 5000:
+                for k in list(self._identidad_previa)[:1000]:
+                    self._identidad_previa.pop(k, None)
 
     def find_duplicates(self, min_similarity: float = 0.30,
                         max_pairs: int = 50) -> List[Dict[str, Any]]:

@@ -295,6 +295,10 @@ class AnalyticsConfig:
     # de perfil pueden seguir intentando MATCHEAR contra personas ya
     # conocidas (por si tuvieran tambien embeddings de perfil).
     REID_MAX_YAW_FOR_REGISTRATION: float = 20.0
+    # 14-oct-2026: un numero que ya tenia identidad no estrena otra si su
+    # cara no coincide (`face_reidentifier.anotar_identidad`). Tambien
+    # ELDE_REID_CONSERVAR=0 para apagarlo.
+    REID_CONSERVAR_IDENTIDAD: bool = True
     # Pitch maximo para registrar (mas estricto que el de clasificacion)
     REID_MAX_PITCH_FOR_REGISTRATION: float = 35.0
     # Politica de reset: "ttl", "never", "daily", "weekly", "manual"
