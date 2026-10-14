@@ -58,7 +58,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
-from . import (anaqueles_grabador, anaqueles_productos, anaqueles_stock,
+from . import (anaqueles_eventos, anaqueles_grabador, anaqueles_productos,
+               anaqueles_stock,
                ritmo_imagenes)
 from .anaqueles_pose import PoseMunecas
 from .anaqueles_registro import GRID_DIM, RegistroAnaqueles, raiz_salida
@@ -1471,6 +1472,14 @@ class MedidorAnaqueles:
                     continue
                 self._ref_ts[idx] = t
                 self.registro.guardar_ref(idx, frame[y1:y2, x1:x2])
+                # Dónde está cada producto en ESA foto (13-oct-2026, para el
+                # informe del pasillo): mismo instante, siempre encajan.
+                anaqueles_eventos.guardar_diseno(
+                    getattr(self.registro, '_carpeta', None), idx, [x1, y1, x2, y2],
+                    [{'pos': int(pos), 'nombre': str(nombre),
+                      'poligono': (np.asarray(poli, dtype=float)
+                                   - [x1, y1]).round(1).tolist()}
+                     for pos, nombre, poli in self._productos.get(idx, [])])
         except Exception as exc:                            # noqa: BLE001
             logger.debug("anaqueles: refs fallaron: %s", exc)
 
@@ -1714,6 +1723,13 @@ class MedidorAnaqueles:
             evento['producto'] = producto
         self._feed.append(evento)
         self._feed_sucio = True
+        # Con su hora y su persona, para el informe del pasillo (13-oct-2026,
+        # `anaqueles_eventos.py`): el registro del día solo guarda totales.
+        anaqueles_eventos.apuntar(
+            getattr(self.registro, '_carpeta', None),
+            {'tipo': tipo, 'area': idx, 'area_nombre': self._nombre(idx),
+             'hora': _hora(t), 'producto': producto, 'pid': pid,
+             'genero': genero, 'rango': rango}, t)
 
     def _limpiar_efimero(self) -> None:
         """Tras un cambio de escena: nada de lo «en curso» sigue siendo real."""

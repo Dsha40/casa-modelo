@@ -9,6 +9,13 @@ registro de personas detectadas, el personal enrolado y una sección de
 metodología que explica cada término — para que el PDF se entienda sin
 haber visto nunca el dashboard.
 
+**Desde el 13-oct-2026 el botón «Exportar PDF» da el «Informe del pasillo»**
+(`informe_pasillo.py`, el formato que diseñó el usuario), del periodo y la
+cámara elegidos en el dashboard. Este informe clásico queda de reserva: sale
+si no hay navegador para imprimir el nuevo (p. ej. el servidor de Linux) o
+si falla, y con `formato=clasico`. `/api/informes/tienda.html` da la página
+del nuevo, para verla o imprimirla a mano.
+
 ## Diseño
 
 - **reportlab** (ya en el venv) para el documento; **matplotlib** (Agg)
@@ -26,10 +33,10 @@ import io
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +47,45 @@ _NARANJA = '#b35a00'
 _GRIS = '#555555'
 
 
-@router.get('/tienda.pdf')
-def informe_tienda(fecha: Optional[str] = Query(
-        None, pattern=r'^\d{4}-\d{2}-\d{2}$')):
-    """El informe del día (hoy por defecto), listo para imprimir/compartir.
+_FECHA = r'^\d{4}-\d{2}-\d{2}$'
+#: `Annotated` y no `= Query(None)`: así el valor por defecto es None también
+#: al llamar a la función directamente (las pruebas lo hacen).
+_Fecha = Annotated[Optional[str], Query(pattern=_FECHA)]
+_Camara = Annotated[Optional[str], Query(max_length=200)]
+
+
+def _periodo(fecha: Optional[str], desde: Optional[str],
+             hasta: Optional[str]) -> Tuple[str, str]:
+    """(desde, hasta). Sin nada, la jornada en curso; `fecha` = un día.
 
     «Hoy» es la JORNADA en curso, no el día natural (5-sep-2026): con
     ELDE_TIENDA_CORTE_JORNADA_H=22, a la 01:30 la tienda sigue en la jornada
     de ayer, y el informe por defecto salía vacío (el del día natural, que
     aún no tiene datos)."""
     from src.analityc.core import tienda_almacen as _ta
-    fecha = fecha or _ta.jornada_de()
+    hasta = hasta or fecha or desde or _ta.jornada_de()
+    desde = desde or fecha or hasta
+    return (hasta, desde) if hasta < desde else (desde, hasta)
+
+
+@router.get('/tienda.pdf')
+def informe_tienda(fecha: _Fecha = None, desde: _Fecha = None,
+                   hasta: _Fecha = None, camara: _Camara = None,
+                   formato: Annotated[str, Query(pattern=r'^(pasillo|clasico)$')] = 'pasillo'):
+    """El informe del periodo (hoy por defecto), listo para imprimir/compartir.
+
+    El del pasillo (13-oct-2026); si no se puede, el clásico del último día
+    del periodo, como antes (ver el docstring del módulo)."""
+    desde, hasta = _periodo(fecha, desde, hasta)
+    if formato == 'pasillo':
+        pdf = _pdf_pasillo(desde, hasta, camara or None)
+        if pdf is not None:
+            nombre = (f'Informe_Pasillo_{desde}.pdf' if desde == hasta
+                      else f'Informe_Pasillo_{desde}_a_{hasta}.pdf')
+            return Response(content=pdf, media_type='application/pdf',
+                            headers={'Content-Disposition':
+                                     f'inline; filename="{nombre}"'})
+    fecha = hasta
     buf = io.BytesIO()
     try:
         construir_informe_tienda(buf, fecha)
@@ -63,6 +98,43 @@ def informe_tienda(fecha: Optional[str] = Query(
         content=buf.getvalue(), media_type='application/pdf',
         headers={'Content-Disposition':
                  f'inline; filename="informe_tienda_{fecha}.pdf"'})
+
+
+@router.get('/tienda.html')
+def informe_tienda_html(fecha: _Fecha = None, desde: _Fecha = None,
+                        hasta: _Fecha = None, camara: _Camara = None):
+    """El informe del pasillo como página (lo mismo que se imprime a PDF)."""
+    from . import informe_pasillo
+    desde, hasta = _periodo(fecha, desde, hasta)
+    try:
+        return HTMLResponse(informe_pasillo.construir(desde, hasta, camara or None))
+    except Exception as exc:                                # noqa: BLE001
+        logger.error("informe del pasillo: falló la página: %s", exc,
+                     exc_info=True)
+        raise HTTPException(status_code=500,
+                            detail=f'no se pudo generar el informe: {exc}')
+
+
+def _pdf_pasillo(desde: str, hasta: str,
+                 camara: Optional[str]) -> Optional[bytes]:
+    """El informe del pasillo en PDF, o None si no se pudo (sin navegador
+    para imprimirlo o un fallo): entonces sale el clásico."""
+    try:
+        from . import informe_pasillo
+        t0 = time.time()
+        pdf = informe_pasillo.a_pdf(
+            informe_pasillo.construir(desde, hasta, camara))
+    except Exception as exc:                                # noqa: BLE001
+        logger.error("informe del pasillo: falló (%s); sale el clásico",
+                     exc, exc_info=True)
+        return None
+    if pdf is None:
+        logger.warning("informe del pasillo: no se pudo imprimir (¿sin "
+                       "Edge/Chrome?); sale el clásico")
+    else:
+        logger.info("informe del pasillo %s a %s: %d KB en %.1f s", desde,
+                    hasta, len(pdf) // 1024, time.time() - t0)
+    return pdf
 
 
 # ── Construcción ─────────────────────────────────────────────────────────

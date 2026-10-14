@@ -246,8 +246,14 @@ def test_el_informe_por_defecto_es_el_de_la_jornada_en_curso(monkeypatch):
     pedidas = []
     monkeypatch.setattr(informe_pdf, 'construir_informe_tienda',
                         lambda destino, fecha: pedidas.append(fecha))
+    # Desde el 13-oct-2026 se pide antes el del pasillo (mismo periodo); aquí
+    # «no se puede imprimir» y sale el clásico, que es lo que se mira.
+    del_pasillo = []
+    monkeypatch.setattr(informe_pdf, '_pdf_pasillo',
+                        lambda desde, hasta, camara: del_pasillo.append((desde, hasta)))
     informe_pdf.informe_tienda(None)
     assert pedidas == ['2026-09-01']
+    assert del_pasillo == [('2026-09-01', '2026-09-01')]
     # Con el día natural (corte 0) sí es el día 2; y una fecha explícita manda.
     monkeypatch.setattr(ta, 'CORTE_JORNADA_H', 0)
     informe_pdf.informe_tienda(None)

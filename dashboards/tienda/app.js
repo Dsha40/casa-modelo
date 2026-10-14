@@ -712,13 +712,19 @@ function aplicarPeriodo(etiqueta, rango = {}) {
   for (const chip of document.querySelectorAll('.chip[data-periodo]')) {
     chip.classList.toggle('activo', chip.dataset.periodo === PERIODO.etiqueta);
   }
-  // El PDF es por jornada: se le pasa el último día del periodo.
-  const pdf = document.getElementById('btn-pdf');
-  if (pdf) pdf.href = `/api/informes/tienda.pdf?fecha=${encodeURIComponent(PERIODO.hasta)}`;
+  enlacePdf();
 
   mostrar = 24;
   pintar().catch(console.error);
   pintarAnaqueles().catch(console.error);
+}
+
+/** El PDF es el «Informe del pasillo» (13-oct-2026): el periodo y la
+ *  cámara que se están viendo, también nada más abrir la página. Sin
+ *  navegador en el servidor sale el clásico, de un día (el último). */
+function enlacePdf() {
+  const pdf = document.getElementById('btn-pdf');
+  if (pdf) pdf.href = `/api/informes/tienda.pdf?${consulta()}`;
 }
 
 async function pintarFiltroCamaras() {
@@ -737,6 +743,7 @@ function montarControles() {
   Object.assign(PERIODO, ventanaDe('hoy'));
   document.getElementById('f-desde').value = PERIODO.desde;
   document.getElementById('f-hasta').value = PERIODO.hasta;
+  enlacePdf();
   for (const chip of document.querySelectorAll('.chip[data-periodo]')) {
     chip.addEventListener('click', () => aplicarPeriodo(chip.dataset.periodo));
   }
