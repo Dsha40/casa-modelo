@@ -696,6 +696,12 @@ class AnalyticsConfig:
     # opcional por los momentos»); tambien con ELDE_CONGELAR_CORTES=1.
     CONGELAR_EN_CORTES: bool = False
     DEMO_B_SEGURIDAD: float = 0.95
+    # «Cara propia» (14-oct-2026, `clasificador_b._EspiaYuNet`): solo la
+    # cara que cae en la cabeza de esa persona, no la del vecino. Banco con
+    # etiquetas a mano (8-oct, 251 personas): la identidad que mas personas
+    # juntaba, de 10 a 5 numeros; acierto de genero 93,0 -> 94,2 %; con
+    # identidad 36 -> 33 %. Encendida por decision del usuario (14-oct).
+    DEMO_B_CARA_PROPIA: bool = True
 
     # Taxonomia GRUESA de edad para resultados solo-corporales (age_source=body)
     # Forma: (min, max, etiqueta). El maximo del ultimo bin cubre 60+.

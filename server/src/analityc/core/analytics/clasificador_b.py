@@ -58,9 +58,30 @@ def usar_b() -> bool:
     return valor not in ('clasico', 'clásico', 'classic', 'a', '0', 'no')
 
 
+def _cara_propia() -> bool:
+    """«Cara propia» (14-oct-2026): solo vale la cara que cae donde va la
+    cabeza de ESA persona. Encendida por defecto (AnalyticsConfig.
+    DEMO_B_CARA_PROPIA); apagar con ELDE_CARA_PROPIA=0."""
+    v = os.environ.get('ELDE_CARA_PROPIA', '').strip().lower()
+    if v:
+        return v in ('1', 'true', 'si', 'sí', 'on')
+    return bool(getattr(dm.AnalyticsConfig, 'DEMO_B_CARA_PROPIA', False))
+
+
 class _EspiaYuNet:
     """YuNet sin cambiar su resultado: recuerda la última imagen y sus caras
-    para recortar la cara «natural» sin buscarla otra vez."""
+    para recortar la cara «natural» sin buscarla otra vez.
+
+    Con `region` puesta («cara propia», 14-oct-2026) se quitan las caras
+    cuyo centro no cae en la cabeza de la persona: dentro de su caja a lo
+    ancho y entre un 10 % por encima de su borde de arriba y el 40 % de su
+    altura. La ventana de búsqueda es la caja ±25 % de ancho y, de las caras
+    que hay, se elegía la más nítida aunque fuera la del VECINO: en la
+    grabación del 8-oct, dos números a la vez con parecido de cara 0,96-0,99
+    (la misma cara). En el banco con etiquetas a mano (13-oct): identidades
+    que juntaban a un hombre y una mujer, de 10 a 5."""
+
+    region = None   # (x1, y1, ancho, alto de la ventana, caja de la persona)
 
     def __init__(self, real: Any) -> None:
         self.real = real
@@ -72,6 +93,15 @@ class _EspiaYuNet:
 
     def detect(self, img):
         r = self.real.detect(img)
+        if self.region is not None and r[1] is not None and len(r[1]):
+            x1c, y1c, wc, hc, (bx1, by1, bx2, by2) = self.region
+            sx, sy = wc / max(1, img.shape[1]), hc / max(1, img.shape[0])
+            ph = max(1.0, by2 - by1)
+            propias = [f for f in r[1]
+                       if bx1 <= x1c + (float(f[0]) + float(f[2]) / 2) * sx <= bx2
+                       and by1 - 0.10 * ph <= y1c + (float(f[1]) + float(f[3]) / 2) * sy
+                       <= by1 + 0.40 * ph]
+            r = (r[0], np.array(propias) if propias else None)
         self.ultimo = (img, r[1])
         return r
 
@@ -188,7 +218,25 @@ class ClasificadorB(dm.DemographicsClassifier):
         self._ctx_busquedas += 1
         if self._ctx_busquedas > 1:
             return None, None, 0.0
-        return super()._detect_face_with_pose(person_crop)
+        esp = self._yunet
+        if (_cara_propia() and isinstance(esp, _EspiaYuNet)
+                and self._ctx_frame is not None and self._ctx_bbox is not None):
+            # La ventana que monta `_sample_once` para su primer recorte:
+            # caja ±25 % de ancho, de -20 % a +55 % de alto. Si el recorte no
+            # es esa ventana, no se filtra.
+            hh, ww = self._ctx_frame.shape[:2]
+            x1, y1, x2, y2 = [int(v) for v in self._ctx_bbox]
+            pw, ph = x2 - x1, max(1, y2 - y1)
+            mx = int(pw * 0.25)
+            t_x1, t_y1 = max(0, x1 - mx), max(0, y1 - int(ph * 0.20))
+            t_x2, t_y2 = min(ww, x2 + mx), min(hh, y1 + int(ph * 0.55))
+            if (t_x2 - t_x1, t_y2 - t_y1) == (person_crop.shape[1], person_crop.shape[0]):
+                esp.region = (t_x1, t_y1, t_x2 - t_x1, t_y2 - t_y1, (x1, y1, x2, y2))
+        try:
+            return super()._detect_face_with_pose(person_crop)
+        finally:
+            if isinstance(esp, _EspiaYuNet):
+                esp.region = None
 
     def _cara_natural(self, score_min: float) -> Optional[np.ndarray]:
         esp = self._yunet
