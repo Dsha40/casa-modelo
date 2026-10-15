@@ -210,6 +210,21 @@ def test_una_sola_medida_por_encima_confirma_la_bajada(tmp_path):
     assert otro.bloque()['bajadas'] == []
 
 
+def test_quien_tapaba_hace_un_instante_sigue_tapando(tmp_path):
+    """15-oct-2026: bajadas con la gorra del que acomodaba la balda dentro
+    del «ahora»; en ese frame su caja no llegó al vigilante. Un cuerpo visto
+    hace menos de `stock_tapa_memoria_s` sigue tapando; pasado ese tiempo,
+    se mide."""
+    ENCIMA = (90, 60, 210, 400)
+    v = _con_ref(tmp_path)
+    v.tras_agarre(0, T0 + 10)
+    v.vigilar(FALTA_ALGO, PRODUCTOS, NOMBRES, [ENCIMA], T0 + 12)   # tapado
+    v.vigilar(FALTA_ALGO, PRODUCTOS, NOMBRES, [LEJOS], T0 + 12.5)  # caja perdida
+    assert v.bloque()['bajadas'] == []
+    v.vigilar(FALTA_ALGO, PRODUCTOS, NOMBRES, [LEJOS], T0 + 14)    # ya se fue
+    assert v.bloque()['bajadas'][0]['bajadas'] == 1
+
+
 def test_la_imagen_gris_de_un_corte_ni_se_mide_ni_sirve_de_foto(tmp_path):
     """13-oct-2026: a las 08:11 iVMS mandó su imagen gris de corte y dos
     medidas sobre ella dieron bajadas falsas (0,83 y 0,78) que confirmaron un

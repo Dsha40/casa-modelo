@@ -259,6 +259,10 @@ _DEFECTOS: Dict[str, Any] = {
     'stock_repuesto_frac': 0.6,
     # La petición de foto de referencia caduca si siguen tapando el producto.
     'stock_peticion_max_s': 120.0,
+    # Un cuerpo visto hace menos de esto sigue «tapando» (15-oct-2026): con
+    # la bajada confirmada por UNA medida, bastaba un frame sin la caja del
+    # que acomodaba la balda para medir su cabeza como «falta producto».
+    'stock_tapa_memoria_s': 1.5,
     # Control de bajadas (9-oct-2026, lo pidió el usuario): tras un agarre,
     # un cambio >= este umbral (y < stock_umbral) confirmado
     # stock_confirmaciones veces es una BAJADA: se cuenta y se rehace la

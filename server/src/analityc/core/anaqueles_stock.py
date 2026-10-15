@@ -353,6 +353,8 @@ class VigilanteStock:
         #: Solo para la evidencia en disco: la foto de la alerta es el antes
         #: y el después del producto (lo pidió el usuario el 5-oct).
         self._ultima_persona: Dict[int, Dict[str, Any]] = {}
+        #: (t, caja) de los cuerpos de los últimos `stock_tapa_memoria_s`.
+        self._cuerpos_recientes: List[Tuple[float, Tuple[float, ...]]] = []
         #: Alertas «posible agotado» para el panel de alertas, con su foto.
         self._alertas_salida: List[Dict[str, Any]] = []
         #: Hora del último frame: con ella sale «lleva X» de cada alerta.
@@ -407,12 +409,28 @@ class VigilanteStock:
         if cortes_video.sin_video(frame):
             self._publicar()
             return
+        cuerpos = self._con_recientes(cuerpos, float(t))
         try:
             self._vigilar(frame, productos, nombres_area, cuerpos, t)
         except Exception as exc:                            # noqa: BLE001
             logger.error("stock[%s]: falló la vigilancia: %s",
                          self.camera_id, exc)
         self._publicar()
+
+    def _con_recientes(self, cuerpos, t: float) -> List:
+        """Los cuerpos de este frame más los vistos hace poco (15-oct-2026).
+
+        Las fotos de las bajadas del 15-oct (10:25:24, San Domingo) tenían
+        la gorra del que acomodaba la balda dentro del «ahora»: en ese frame
+        su caja no llegó al vigilante y el recuadro se midió como libre. Con
+        la bajada confirmada por una sola medida, un frame así bastaba."""
+        memoria = float(self.cfg.get('stock_tapa_memoria_s', 1.5))
+        actuales = [tuple(float(v) for v in c[:4]) for c in (cuerpos or [])]
+        self._cuerpos_recientes = [(tc, c) for tc, c in self._cuerpos_recientes
+                                   if 0.0 <= t - tc <= memoria]
+        recientes = [c for _tc, c in self._cuerpos_recientes]
+        self._cuerpos_recientes.extend((t, c) for c in actuales)
+        return actuales + recientes
 
     def vigilando(self, area: int) -> bool:
         """¿Queda algún producto de `area` esperando su medida tras un

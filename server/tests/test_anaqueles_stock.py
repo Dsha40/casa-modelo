@@ -145,7 +145,10 @@ def test_tapado_no_se_fotografia_y_se_toma_al_apartarse(tmp_path):
     v.vigilar(SURTIDO, PRODUCTOS, NOMBRES, [DELANTE], T0)
     assert v.bloque()['referencias'] == 0
     assert v.bloque()['esperando_foto'] == 1
+    # A 1 s aún «tapa» (memoria de 1,5 s, 15-oct-2026); a los 2 s, no.
     v.vigilar(SURTIDO, PRODUCTOS, NOMBRES, [LEJOS], T0 + 1)
+    assert v.bloque()['referencias'] == 0
+    v.vigilar(SURTIDO, PRODUCTOS, NOMBRES, [LEJOS], T0 + 2)
     assert v.bloque()['referencias'] == 1
     assert v.bloque()['esperando_foto'] == 0
 
