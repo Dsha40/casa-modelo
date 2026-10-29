@@ -36,6 +36,11 @@ env/
 # el 9-sep-2026 y el enlace volvio a colarse en el siguiente `git add -A`.
 models/models
 
+# El modelo del uniforme de Santa Rosa (16-oct-2026, `clasificador_uniforme.py`)
+# esta ENTRENADO CON FOTOS DE CLIENTES: vive solo en el PC de la tienda y no
+# se sube nunca. Misma razon que arriba para que la regla viva aqui.
+models/personal/
+
 # ===== Salidas de entrenamiento / inferencia =====
 runs/
 output/

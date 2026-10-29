@@ -30,6 +30,8 @@ from . import filtro_fondo
 from . import filtro_memoria
 from . import zonas_ignorar
 from . import ritmo_imagenes
+from . import clasificador_uniforme
+from . import personal_descuento
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
 from .analytics.demographics import (DemographicsClassifier,
@@ -752,6 +754,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         Retorna categoria legacy ('Hombres', 'Mujeres', 'Ninos') para
         compatibilidad con el sistema existente de contadores.
         """
+        # El PERSONAL no se clasifica (19-oct-2026, lo pidió el usuario): no
+        # es un cliente y así se ahorran caras y MiVOLO.
+        if personal_descuento.no_clasificar(self, track_id):
+            return 'Personas'
         if track_id is not None and hasattr(self, '_demographics'):
             result = self._demographics.classify(frame, bbox, track_id)
             # Log de clasificacion
@@ -2161,7 +2167,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             if track.get('es_personal'):
                 continue
             pid = track.get('persistent_id')
-            if not pid:
+            if not pid or personal_descuento.es_personal(self, pid):
                 continue
             # Los provisionales solo entran cuando NO se exige confirmacion.
             # Con ellos se mide PRESENCIA, no visitantes unicos: una oclusion
@@ -2478,6 +2484,20 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 # de entrada/salida, segun el orden del plan. Se le pasa el
                 # frame para el Re-ID corporal (Hito 9): enrolar/matchear cuerpo.
                 self._resolve_track_identities(inference_image)
+
+                # Personal por el UNIFORME (16-oct-2026,
+                # `clasificador_uniforme.py`). En «sombra» solo apunta en
+                # output/uniforme_sombra/ quién parece personal; en «activo»
+                # además le pone `es_personal` (la marca del personal dado de
+                # alta). Sin su modelo en models/ no hace nada.
+                for _tid_u in clasificador_uniforme.observar(
+                        camera_id, inference_image, self.active_tracks,
+                        self.frame_counter,
+                        self._imagenes(int(AnalyticsConfig.PERSONAL_UNIFORME_CADA)),
+                        getattr(self, '_capture_meta', None)):
+                    # Pudo contarse como visitante y tener ficha antes del
+                    # tercer voto: se le quita todo (`personal_descuento.py`).
+                    personal_descuento.descontar(self, _tid_u, camera_id)
 
                 # Entradas/salidas POR PERSONA (Hito 5): maquina FUERA/DENTRO
                 # por persistent_id con anti-rebote -> visitantes unicos del

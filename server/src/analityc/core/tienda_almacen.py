@@ -358,6 +358,23 @@ class AlmacenTienda:
         self._encolar(('clasif_identidad', time.time(), '', str(stem), 0.0,
                        None, None, str(person_uuid).strip()))
 
+    def quitar_persona(self, camera_id: Any, persistent_id: Any,
+                       ts: Optional[float] = None) -> None:
+        """Era PERSONAL (19-oct-2026, `personal_descuento.py`): borra su
+        visita y sus eventos de esa jornada y cámara. Va por la MISMA cola
+        que las entradas, así que también se lleva las aún sin volcar."""
+        if not persistent_id:
+            return
+        self._encolar(('quitar_persona',
+                       float(ts if ts is not None else time.time()),
+                       str(camera_id), str(persistent_id), 0.0, None, None))
+
+    def quitar_clasificacion(self, stem: str) -> None:
+        """La ficha `stem` era de personal: fuera de las clasificaciones."""
+        if stem:
+            self._encolar(('quitar_clasif', time.time(), '', str(stem), 0.0,
+                           None, None))
+
     def _encolar(self, op: Tuple) -> None:
         try:
             with self._lock:
@@ -419,6 +436,17 @@ class AlmacenTienda:
                             'UPDATE tienda_clasificaciones SET person_uuid = ? '
                             'WHERE stem = ? AND person_uuid IS NULL',
                             (extra[0], pid))
+                        continue
+                    if tipo == 'quitar_persona':
+                        for tabla in ('tienda_visitas', 'tienda_eventos'):
+                            con.execute(
+                                f'DELETE FROM {tabla} WHERE jornada = ? '
+                                'AND camera_id = ? AND persistent_id = ?',
+                                (jornada, cam, pid))
+                        continue
+                    if tipo == 'quitar_clasif':
+                        con.execute('DELETE FROM tienda_clasificaciones '
+                                    'WHERE stem = ?', (pid,))
                         continue
                     if tipo == 'demografia':
                         self._upsert_demografia(con, jornada, cam, pid, ts,

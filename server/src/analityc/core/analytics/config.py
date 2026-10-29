@@ -365,6 +365,33 @@ class AnalyticsConfig:
     # su cuerpo (evita ruido de tracks efimeros).
     BODY_REID_MIN_SEEN_FRAMES: int = 4
 
+    # ── Personal por el UNIFORME de Santa Rosa (16-oct-2026) ──
+    # `clasificador_uniforme.py`: ResNet-18 afinada con fotos marcadas a
+    # mano (azul arriba, salpicadura blanca abajo). «sombra» = solo apunta
+    # en output/uniforme_sombra/ qué seguimientos parecen personal; NO cambia
+    # ninguna métrica. «activo» = además los marca `es_personal` (dejan de
+    # contar, como el personal dado de alta). «apagado» = no hace nada. Sin
+    # el archivo del modelo (entrenado con fotos de clientes: solo vive en el
+    # PC de la tienda, nunca en git) se apaga solo. ELDE_UNIFORME manda.
+    # «activo» desde el 16-oct por la tarde: lo pidió el usuario para la
+    # recogida de datos del informe, vigilándolo en vivo.
+    PERSONAL_UNIFORME_MODO: str = "activo"
+    PERSONAL_UNIFORME_MODELO: str = "models/personal/uniforme_resnet18.pt"
+    # Cada cuántas imágenes se mira a cada persona (a 7,7 fps de referencia,
+    # en tiempo real con `_imagenes`), escalonado por número de seguimiento.
+    PERSONAL_UNIFORME_CADA: int = 4
+    # Alto mínimo de la caja (px): la gente pequeña del fondo no se mira.
+    PERSONAL_UNIFORME_ALTO_MIN: int = 80
+    # Decisión por SEGUIMIENTO: al menos VOTOS_MIN votos y que la fracción de
+    # votos >= UMBRAL (cada voto, una imagen) llegue a MAYORIA. Medido en
+    # sombra el 16-oct con el vídeo (marcas a mano, 94 seguimientos): con la
+    # mayoría, 12 de 12 empleados que se vieron 3+ veces y 1 de 80 clientes
+    # (probable cambio de persona del seguimiento); con «media >= 0,9», solo
+    # 5 de 12: quien trabaja largo rato tiene posturas que el modelo duda.
+    PERSONAL_UNIFORME_VOTOS_MIN: int = 3
+    PERSONAL_UNIFORME_UMBRAL: float = 0.50
+    PERSONAL_UNIFORME_MAYORIA: float = 0.50
+
     # ── Suavizado demografico POR PERSONA (persistent_id) — Hito 6 ──
     # Cada lectura demografica comiteada (ya suavizada por track) se acumula
     # como VOTO en el registro de la persona: genero por voto ponderado por
