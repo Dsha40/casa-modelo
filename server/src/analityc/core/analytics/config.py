@@ -412,6 +412,9 @@ class AnalyticsConfig:
     # Sin uniones de ida y vuelta (A->B y luego B->A) (26-oct-2026,
     # `costura_sombra._sin_rebote`). ELDE_COSTURA_SIN_REBOTE=0 la apaga.
     COSTURA_SIN_REBOTE: bool = True
+    # Presupuesto de tareas pesadas por imagen (26-oct-2026,
+    # `presupuesto_imagen.py`). PRUEBA: APAGADO; ELDE_PRESUPUESTO_IMAGEN=1.
+    PRESUPUESTO_IMAGEN: bool = False
     # Filtro de forma (alto/ancho del perfil de ángulo) SIN aplicar a las cajas
     # que tocan el borde de ABAJO de la imagen (26-oct-2026): ahí la gente está
     # pegada a la cámara y cortada (agachada en la balda baja), no es una caja

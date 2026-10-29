@@ -35,6 +35,7 @@ from . import personal_descuento
 from . import personal_mapa
 from . import costura_sombra
 from . import revision_cruces
+from . import presupuesto_imagen
 from . import calor_diferido
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
@@ -1774,8 +1775,13 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     _cur_cat in ('Personas', 'Desconocido')
                     or AnalyticsConfig.DEMO_HYSTERESIS_ENABLED
                 )
+                _turno = (self.frame_counter + tid) % self._imagenes(self._classify_every_n) == 0
+                if _cur_cat in ('Personas', 'Desconocido'):
+                    # Solo quien aún no tiene género pasa por el presupuesto
+                    # (`presupuesto_imagen.py`; apagado = el turno de siempre).
+                    _turno = presupuesto_imagen.toca(self, tid, 'genero', _turno)
                 if (_needs_classify
-                        and (self.frame_counter + tid) % self._imagenes(self._classify_every_n) == 0
+                        and _turno
                         and self.last_processed_frame is not None):
                     new_cat = self._classify_person(self.last_processed_frame, det['box'], tid)
                     if new_cat in ('Hombres', 'Mujeres', 'Ninos'):
@@ -1794,7 +1800,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 is_inside = self.is_inside_polygon(center, roi_polygon_points)
 
                 category = 'Personas'
-                if self.last_processed_frame is not None:
+                if (self.last_processed_frame is not None
+                        and presupuesto_imagen.toca(self, tid, 'genero', True)):
                     cls_result = self._classify_person(
                         self.last_processed_frame, det['box'], tid
                     )
@@ -1893,7 +1900,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         for tid, track in self.active_tracks.items():
             uid = reid.get_persistent_id(tid) if reid_ok else None
             _due = (body_ok and track.get('seen_frames', 0) >= _min_seen
-                    and (self.frame_counter + tid) % _every == 0)
+                    and presupuesto_imagen.toca(          # apagado: el turno de siempre
+                        self, tid, 'huella', (self.frame_counter + tid) % _every == 0))
             if uid:
                 track['persistent_id'] = uid
                 track['persistent_confirmed'] = True
@@ -2307,6 +2315,9 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                         return image, cortes_video.metadata_congelada(cam_state)
                 self.frame_counter += 1
                 self.last_processed_frame = image.copy()
+                # Presupuesto de tareas pesadas por imagen (26-oct-2026,
+                # PRUEBA apagada por defecto: `presupuesto_imagen.py`).
+                presupuesto_imagen.nueva_imagen(self)
 
                 # Ruta sin estado por camara (fallback): el acumulador se
                 # toma del registro global la primera vez que se conoce el
