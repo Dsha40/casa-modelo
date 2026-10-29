@@ -43,13 +43,26 @@ Un frame cuyo proceso falla tampoco es un descarte: sale en el log como
 «Error procesando frame».
 
 Nunca lanza: medir no puede costar un frame.
+
+## La última hora, en memoria (22-oct-2026)
+
+La página «En vivo» del dashboard (`api_en_vivo.py`) pinta la velocidad de
+la última hora y cuánto hace que llegó la última imagen. Antes eso solo
+estaba en el log, y leer el log en cada refresco de la página sería leer
+megas para sacar unas pocas líneas. Ahora cada periodo escrito en el log se
+guarda también aquí (`historial`, los últimos `HISTORIAL_PERIODOS`), cada
+imagen procesada apunta su hora (`ultima_imagen`) y cada imagen recibida, lo
+que pesa (`ultimo_tamano`): una de ~1 KB es la captura vacía de una ventana
+minimizada, y una de ~39 KB, la pantalla gris de un corte de iVMS. No cambia
+lo que sale en el log.
 """
 from __future__ import annotations
 
 import logging
 import threading
 import time
-from typing import Any, Dict, List
+from collections import deque
+from typing import Any, Deque, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +70,15 @@ logger = logging.getLogger(__name__)
 #: 5 fps: suficiente para una mediana estable, corto para ver un cambio.
 PERIODO_S = 30.0
 
+#: Periodos que se guardan por cámara: 120 de 30 s = la última hora.
+HISTORIAL_PERIODOS = 120
+
 _lock = threading.Lock()
 _por_camara: Dict[str, Dict[str, Any]] = {}
 _desde = time.monotonic()
+_historial: Dict[str, Deque[Dict[str, Any]]] = {}
+_ultima_imagen: Dict[str, float] = {}
+_ultimo_tamano: Dict[str, int] = {}
 
 
 def _cam(camera_id: Any) -> Dict[str, Any]:
@@ -100,6 +119,8 @@ def anotar_recibido(camera_id: Any, tamano: int = 0) -> None:
             c = _cam(camera_id)
             c['recibidos'] += 1
             c['bytes'] += max(0, int(tamano))
+            if tamano:
+                _ultimo_tamano[str(camera_id)] = int(tamano)
         _volcar_si_toca()
     except Exception:                                       # noqa: BLE001
         pass
@@ -111,6 +132,7 @@ def anotar_procesado(camera_id: Any, ms: float) -> None:
             c = _cam(camera_id)
             c['procesados'] += 1
             c['ms'].append(float(ms))
+            _ultima_imagen[str(camera_id)] = time.time()
         _volcar_si_toca()
     except Exception:                                       # noqa: BLE001
         pass
@@ -154,12 +176,41 @@ def resumen(reiniciar: bool = False) -> List[Dict[str, Any]]:
         return salida
 
 
+def historial(camera_id: Any) -> List[Dict[str, Any]]:
+    """Los últimos periodos escritos de una cámara, del más viejo al más
+    nuevo. Cada uno es una fila de `resumen` con su `t` (epoch del cierre)."""
+    with _lock:
+        return list(_historial.get(str(camera_id), ()))
+
+
+def ultima_imagen(camera_id: Any) -> Optional[float]:
+    """Epoch de la última imagen procesada de esa cámara; None si ninguna."""
+    with _lock:
+        return _ultima_imagen.get(str(camera_id))
+
+
+def ultimo_tamano(camera_id: Any) -> Optional[int]:
+    """Bytes de la última imagen recibida de esa cámara; None si ninguna."""
+    with _lock:
+        return _ultimo_tamano.get(str(camera_id))
+
+
+def camaras_vistas() -> List[str]:
+    """Cámaras que han mandado alguna imagen desde que arrancó el servidor."""
+    with _lock:
+        return sorted(_ultima_imagen)
+
+
 def _volcar_si_toca() -> None:
     if (time.monotonic() - _desde) < PERIODO_S:
         return
     for r in resumen(reiniciar=True):
         if not (r['recibidos_s'] or r['procesados_s']):
             continue
+        with _lock:
+            _historial.setdefault(
+                r['camera_id'], deque(maxlen=HISTORIAL_PERIODOS)).append(
+                    dict(r, t=round(time.time(), 1)))
         logger.info(
             "FPS [%s] recibidos=%.1f/s procesados=%.1f/s descartados=%d "
             "proceso=%s/%s ms entrada=%.0f KB/s (%s KB/frame) (en %.0f s)",

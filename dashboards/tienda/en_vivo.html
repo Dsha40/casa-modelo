@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>En vivo · Tienda · Dashboards ELDE</title>
+<link rel="stylesheet" href="/dashboards/shared/estilo.css">
+<link rel="stylesheet" href="/dashboards/shared/moderno.css">
+<link rel="stylesheet" href="/dashboards/tienda/estilo.css?v=2026-10-12">
+<link rel="stylesheet" href="/dashboards/tienda/en_vivo.css?v=2026-10-23">
+</head>
+<body>
+<header>
+  <h1>⏱ Tienda — en vivo
+    <small><a href="/dashboards/tienda/" style="color:var(--apagado)">← dashboard de tienda</a></small>
+  </h1>
+  <nav class="secciones">
+    <a href="#camaras">Cámaras</a>
+    <a href="#pc-sec">CPU y RAM</a>
+    <a href="#gpu-sec">GPU</a>
+  </nav>
+  <span class="refresco"></span>
+</header>
+
+<main>
+<p class="ev-intro">Lo que pasa <b>ahora</b>, sin elegir periodo. Se actualiza solo cada 3 segundos.
+  Las cifras de «hoy» son de la jornada en curso; para otros días, el
+  <a href="/dashboards/tienda/">dashboard de tienda</a>.</p>
+
+<div id="camaras"><div class="vacio">cargando…</div></div>
+
+<section id="pc-sec">
+  <h2>🖥️ Procesador y memoria</h2>
+  <p class="porque">Cuánto procesador y memoria usa el PC del servidor, y cuánto se lleva cada programa. Lo mide el propio
+    servidor cada 5 segundos. El procesador de cada programa va en % del PC entero (100 % = todos sus hilos), así que
+    suman con el total. La memoria de cada programa es su «conjunto de trabajo», la del Administrador de tareas: la
+    compartida cuenta en cada uno. «Resto del PC» son los demás programas (el editor, el navegador, la VPN, el
+    antivirus) y el propio Windows.</p>
+  <div id="pc"><div class="vacio">cargando…</div></div>
+</section>
+
+<section id="gpu-sec">
+  <h2>🌡️ Tarjeta gráfica</h2>
+  <p class="porque">Temperatura, uso y consumo de la GPU del servidor. Los apunta cada minuto el vigilante del servidor
+    (<code>vigilante_gpu.ps1</code>) en <code>server\logs\gpu_temp.csv</code>.
+    «Frenando por calor» es la propia tarjeta diciendo que baja su reloj por temperatura.</p>
+  <div id="gpu"><div class="vacio">cargando…</div></div>
+</section>
+</main>
+
+<script src="/dashboards/shared/api.js"></script>
+<script src="/dashboards/tienda/en_vivo.js?v=2026-10-23"></script>
+</body>
+</html>

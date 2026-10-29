@@ -35,6 +35,9 @@ def limpio(monkeypatch):
     monkeypatch.setattr(tf.time, 'monotonic', lambda: reloj['t'])
     monkeypatch.setattr(tf, '_por_camara', {})
     monkeypatch.setattr(tf, '_desde', 1000.0)
+    monkeypatch.setattr(tf, '_historial', {})
+    monkeypatch.setattr(tf, '_ultima_imagen', {})
+    monkeypatch.setattr(tf, '_ultimo_tamano', {})
     return reloj
 
 
@@ -97,6 +100,29 @@ def test_la_linea_lleva_los_descartes_de_la_cola(limpio, caplog):
     lineas = [r.getMessage() for r in caplog.records
               if r.getMessage().startswith('FPS [cam-a]')]
     assert len(lineas) == 1 and 'descartados=2' in lineas[0]   # la resta: 3
+
+
+def test_guarda_en_memoria_cada_periodo_escrito(limpio, monkeypatch):
+    """La página «En vivo» (22-oct-2026) pinta la última hora sin leer el
+    log: cada línea escrita queda también en `historial`, sin pasar de
+    `HISTORIAL_PERIODOS` por cámara, `ultima_imagen` dice cuándo llegó la
+    última y `ultimo_tamano`, cuánto pesaba."""
+    monkeypatch.setattr(tf, 'HISTORIAL_PERIODOS', 2)
+    monkeypatch.setattr(tf.time, 'time', lambda: 5000.0)
+    for periodo in range(1, 4):
+        tf.anotar_recibido('cam-a', 1000 * periodo)
+        tf.anotar_procesado('cam-a', 40 + periodo)
+        limpio['t'] = 1000.0 + periodo * tf.PERIODO_S
+        tf.anotar_recibido('cam-a')               # cierra el periodo
+    historial = tf.historial('cam-a')
+    assert [h['proceso_ms_mediana'] for h in historial] == [42.0, 43.0]
+    assert historial[-1]['t'] == 5000.0
+    assert tf.ultima_imagen('cam-a') == 5000.0
+    # La que cerró el último periodo no dijo su tamaño: vale la anterior.
+    assert tf.ultimo_tamano('cam-a') == 3000
+    assert tf.ultima_imagen('cam-b') is None and tf.historial('cam-b') == []
+    assert tf.ultimo_tamano('cam-b') is None
+    assert tf.camaras_vistas() == ['cam-a']
 
 
 def test_mide_lo_que_pesan_las_imagenes(limpio):

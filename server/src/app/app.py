@@ -120,6 +120,13 @@ async def lifespan(app: FastAPI):
         clasificacion_sombra.instalar()
     except Exception as exc:                                # noqa: BLE001
         logger.debug("clasificacion_sombra no disponible: %s", exc)
+    # CPU y RAM del PC por programa (23-oct-2026), para la página «En vivo»
+    # del dashboard: un hilo que mide cada 5 s (`recursos_pc.py`).
+    try:
+        from . import recursos_pc
+        recursos_pc.iniciar()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("recursos_pc no disponible: %s", exc)
     # Baliza de descubrimiento (UDP): responde a los clientes que preguntan
     # "¿que servidores ELDE hay en esta red?". El puerto real lo pone quien
     # arranca uvicorn (iniciar_servidor_headless.py exporta ELDE_PUERTO_
@@ -229,6 +236,12 @@ app.include_router(api_lectura_router)
 # (compatibilidad aditiva): sus campos los leen otras tres paginas y el PDF.
 from .api_tienda import router as api_tienda_router  # noqa: E402
 app.include_router(api_tienda_router)
+
+# Página «En vivo» del dashboard de tienda (22-oct-2026): velocidad, vídeo o
+# imagen gris, gente, agarres confirmados y sin confirmar, y GPU, en una sola
+# respuesta que la página pide cada 3 s (`api_en_vivo.py`).
+from .api_en_vivo import router as api_en_vivo_router  # noqa: E402
+app.include_router(api_en_vivo_router)
 
 # Busqueda VLM de los dashboards de producto ("buscame el carro rojo").
 # Son ACCIONES (encender el buscador, lanzar una busqueda), asi que viven en
