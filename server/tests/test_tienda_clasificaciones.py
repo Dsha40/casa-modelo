@@ -297,6 +297,10 @@ def test_identidad_primero_el_genero_tardio_no_se_pierde(
     assert ficha['gender'] == 'Mujer' and ficha['age_range'] == '36-50'
     assert 'motivo_sin_demografia' not in ficha, 'ya no es cierto'
     assert _visita(almacen, 'uuid-B') == ('Mujer', '36-50')
+    # El aviso espera a que pase la marca de personal (20-oct-2026,
+    # `_soltar_visitantes`): se suelta como si ya hubiera pasado la espera.
+    import time as _time
+    camara._soltar_visitantes(_time.time() + 3600)
     alertas = camara._alertas_pendientes
     assert len(alertas) == 1 and alertas[0]['gender'] == 'Mujer', \
         'el aviso de visitante que no salió en su momento'

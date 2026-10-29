@@ -2237,6 +2237,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
 
         Se drena al construir la metadata de cada frame: asi cada alerta viaja
         exactamente una vez."""
+        self._soltar_visitantes()      # los avisos de visitante tras su espera
         pendientes = getattr(self, '_alertas_pendientes', None)
         if not pendientes:
             return []

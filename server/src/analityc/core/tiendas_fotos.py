@@ -702,13 +702,45 @@ class FotosMixin:
                 'person_uuid': meta.get('person_uuid'),
                 'crop_image': self._captura_en_b64(stem),
             }
+            # El aviso ESPERA unos segundos (20-oct-2026): el género llega a
+            # veces antes que la marca de personal del uniforme (3 votos), y
+            # 77 fichas de personal del 19-20 oct ya habían avisado como
+            # «visitante» al cliente. Si en la espera se le marca, su ficha
+            # sale de persons/ y el aviso no se manda (`_soltar_visitantes`).
+            if not hasattr(self, '_visitantes_en_espera'):
+                self._visitantes_en_espera = []
+            self._visitantes_en_espera.append(
+                (time.time() + float(getattr(AnalyticsConfig,
+                                             'VISITANTE_ESPERA_S', 8.0)),
+                 stem, alerta))
+            if len(self._visitantes_en_espera) > 200:
+                self._visitantes_en_espera = self._visitantes_en_espera[-100:]
+        except Exception:
+            pass
+
+    def _soltar_visitantes(self, ahora: Optional[float] = None) -> None:
+        """Pasa a la cola de alertas los avisos de visitante cuya espera
+        acabó, salvo los de fichas que ya no están en la galería (eran
+        personal). Nunca lanza."""
+        try:
+            espera = getattr(self, '_visitantes_en_espera', None)
+            if not espera:
+                return
+            ahora = time.time() if ahora is None else ahora
+            listos = [e for e in espera if e[0] <= ahora]
+            if not listos:
+                return
+            self._visitantes_en_espera = [e for e in espera if e[0] > ahora]
             if not hasattr(self, '_alertas_pendientes'):
                 self._alertas_pendientes = []
-            self._alertas_pendientes.append(alerta)
+            for _t, stem, alerta in listos:
+                if os.path.isfile(os.path.join(AnalyticsConfig.CAPTURE_DIR,
+                                               'persons', f'{stem}.json')):
+                    self._alertas_pendientes.append(alerta)
             # Cota de memoria: si el cliente no recoge, no se acumula sin fin.
             if len(self._alertas_pendientes) > 200:
                 self._alertas_pendientes = self._alertas_pendientes[-100:]
-        except Exception:
+        except Exception:                                   # noqa: BLE001
             pass
 
     def _captura_en_b64(self, stem: str) -> str:
