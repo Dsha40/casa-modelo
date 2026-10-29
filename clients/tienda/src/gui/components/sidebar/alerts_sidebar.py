@@ -30,13 +30,16 @@ from elde_core.ui.panel_alertas import Columna, PanelAlertas
 
 # Columnas del panel, de izquierda a derecha.
 COLUMNAS = [
-    Columna('visitantes', 'Visitantes', '👥', '#00a8e8'),
-    Columna('capturas',   'Capturas',   '📸', '#2ecc71'),
+    # 28-oct-2026: miniatura arriba y texto debajo. En la columna estrecha,
+    # foto a la izquierda y texto al lado se solapaban y se cortaban.
+    Columna('visitantes', 'Visitantes', '👥', '#00a8e8', miniatura_arriba=True),
+    Columna('capturas',   'Capturas',   '📸', '#2ecc71', miniatura_arriba=True),
     # «Posible agotado» del modo Anaqueles (5-oct-2026, servidor
     # `anaqueles_stock.py`): columna propia para que no se pierda entre los
     # visitantes. La miniatura es quien agarró; al pulsar, la evidencia
     # antes | ahora | persona.
-    Columna('stock',      'Stock',      '🛒', '#f85149'),
+    # 20-oct-2026: la foto «antes | ahora» arriba, a todo el ancho.
+    Columna('stock',      'Stock',      '🛒', '#f85149', imagen_arriba=True),
 ]
 
 # Eventos de la analitica de retail: ya no llegan (ver cabecera). Si vuelven,

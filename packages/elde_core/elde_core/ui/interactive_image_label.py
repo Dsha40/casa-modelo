@@ -13,7 +13,10 @@ from .regla_pixeles import ReglaPixeles
 # Colores BGR-independientes para Qt (RGB)
 _BLUE  = QColor(40, 120, 255)   # Toma de orden
 _RED   = QColor(255, 60, 60)    # Entrega de plato
-_NARANJA = QColor(255, 160, 40)  # Áreas de anaquel (modo Anaqueles)
+# Áreas de anaquel (modo Anaqueles). Verde desde el 28-oct-2026 (lo pidió el
+# usuario; antes naranja): los productos de dentro llevan cada uno su color
+# y no puede haber ninguno verde (`productos_anaquel.color_de`).
+_VERDE_ANAQUEL = QColor(40, 210, 90)
 # Gris frio para la zona del PERSONAL (modo comedor). Se elige gris a
 # proposito: es la unica zona que NO cuenta gente, y en pantalla tiene que
 # leerse como "aqui no pasa nada" al lado del amarillo del ROI, el azul de la
@@ -186,6 +189,12 @@ class Interactive_imageLabel(QLabel):
 
         self.active_point_index = -1
         self.point_radius = 10
+        # Tamaño DIBUJADO de los vértices de áreas, ROI y zonas (28-oct-2026):
+        # el usuario los pidió más pequeños (3 px; productos 2,5), tapaban la
+        # balda. Solo cambia el dibujo: se siguen cogiendo a `point_radius`
+        # (10 px), así no cuesta más agarrarlos.
+        self.point_radius_dibujo = 3
+        self.point_radius_dibujo_producto = 2.5
         self.current_pixmap = QPixmap()
 
         if not self.show_points:
@@ -553,7 +562,7 @@ class Interactive_imageLabel(QLabel):
                                  and i == self.active_point_index) else fill_color
             painter.setPen(QPen(Qt.black, 2))
             painter.setBrush(QBrush(color))
-            painter.drawEllipse(pix, self.point_radius, self.point_radius)
+            painter.drawEllipse(pix, self.point_radius_dibujo, self.point_radius_dibujo)
         if last is not None and len(pts) > 1:
             first = self.get_scaled_point(pts[0])
             painter.setPen(QPen(line_color, 2, Qt.SolidLine))
@@ -607,7 +616,7 @@ class Interactive_imageLabel(QLabel):
                 color = Qt.red if i == self.active_point_index and self.edit_target == 'roi' else Qt.yellow
                 painter.setPen(QPen(Qt.black, 2))
                 painter.setBrush(QBrush(color))
-                painter.drawEllipse(p_pix, self.point_radius, self.point_radius)
+                painter.drawEllipse(p_pix, self.point_radius_dibujo, self.point_radius_dibujo)
             if last_p is not None and len(self.points) > 1:
                 first_p = self.get_scaled_point(self.points[0])
                 painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
@@ -630,9 +639,10 @@ class Interactive_imageLabel(QLabel):
         # Áreas a ignorar (rojo oscuro, discontinuo), debajo de los
         # anaqueles: son fondo.
         self.ignorar.pintar(painter, self._escalar_xy,
+                            radio=self.point_radius_dibujo,
                             activo=self._ign_arrastre)
 
-        # Areas de anaquel (naranja, numeradas): un cuadrilatero por nivel.
+        # Areas de anaquel (verdes, numeradas): un cuadrilatero por nivel.
         if self.anaqueles_active:
             for a, pts in enumerate(self.anaqueles):
                 if not pts:
@@ -641,17 +651,17 @@ class Interactive_imageLabel(QLabel):
                 for i, pt in enumerate(pts):
                     pix = self.get_scaled_point(pt)
                     if last is not None:
-                        painter.setPen(QPen(_NARANJA, 2, Qt.SolidLine))
+                        painter.setPen(QPen(_VERDE_ANAQUEL, 2, Qt.SolidLine))
                         painter.drawLine(last, pix)
                     last = pix
                     activo = (a == self._anq_area and i == self._anq_vert)
                     painter.setPen(QPen(Qt.black, 2))
-                    painter.setBrush(QBrush(Qt.white if activo else _NARANJA))
-                    painter.drawEllipse(pix, self.point_radius,
-                                        self.point_radius)
+                    painter.setBrush(QBrush(Qt.white if activo else _VERDE_ANAQUEL))
+                    painter.drawEllipse(pix, self.point_radius_dibujo,
+                                        self.point_radius_dibujo)
                 if last is not None and len(pts) > 1:
                     first = self.get_scaled_point(pts[0])
-                    painter.setPen(QPen(_NARANJA, 2, Qt.SolidLine))
+                    painter.setPen(QPen(_VERDE_ANAQUEL, 2, Qt.SolidLine))
                     painter.drawLine(last, first)
                 # Etiqueta del nivel, junto al primer vertice: es lo que el
                 # operador compara con los contadores del panel. La fija el
@@ -664,11 +674,12 @@ class Interactive_imageLabel(QLabel):
                 origen = self.get_scaled_point(pts[0])
                 painter.setPen(QPen(Qt.black, 4))
                 painter.drawText(origen.x() + 14, origen.y() - 9, etiqueta)
-                painter.setPen(QPen(_NARANJA, 2))
+                painter.setPen(QPen(_VERDE_ANAQUEL, 2))
                 painter.drawText(origen.x() + 13, origen.y() - 10, etiqueta)
             # Los productos ENCIMA de sus áreas: están dentro de ellas y
             # son lo que el operador ajusta con más detalle.
             self.productos.pintar(painter, self._escalar_xy,
+                                  radio=self.point_radius_dibujo_producto,
                                   activo=self._prod_arrastre)
 
         # Los utensilios de direccion, los ULTIMOS: van encima de las zonas

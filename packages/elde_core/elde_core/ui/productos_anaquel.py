@@ -45,10 +45,43 @@ MAX_NOMBRE = 60
 #: marcas vecinas se pisan y no hay forma de coger la que uno quiere.
 RADIO = 7
 
-#: Violeta: no lo usa ninguna otra herramienta del recuadro (ROI amarillo,
-#: pedido azul, entrega rojo, personal gris, áreas naranja, muñecas verde y
-#: ámbar), así que no hay forma de confundir un producto con un área.
-_COLOR_RGB = (190, 100, 255)
+#: Los primeros productos, con colores elegidos a mano para que se distingan
+#: bien entre sí (28-oct-2026). Ninguno verde: el verde es de las áreas.
+_PALETA = (
+    (190, 100, 255),   # violeta (el de siempre)
+    (255, 210, 60),    # amarillo
+    (255, 90, 170),    # rosa
+    (60, 210, 255),    # cian
+    (255, 140, 40),    # naranja
+    (240, 240, 240),   # blanco
+    (70, 110, 255),    # azul
+    (255, 80, 80),     # rojo claro
+    (200, 160, 110),   # marrón claro
+    (230, 170, 255),   # lila
+    (255, 175, 150),   # salmón
+    (150, 190, 255),   # azul pálido
+)
+
+
+def color_de(indice: int) -> Tuple[int, int, int]:
+    """Color RGB del producto nº `indice` (28-oct-2026): cada producto el
+    suyo, y uno nuevo, uno distinto de los anteriores.
+
+    Los 12 primeros, de `_PALETA`. Del 13 en adelante, el tono avanza con el
+    ángulo áureo (137,5°), que no repite, más claro para no confundirse con
+    los de la paleta. Se saltan los verdes (60-165°): son de las áreas de
+    anaquel, y un producto verde no se distinguiría del área donde está.
+    Como la identidad del producto es su posición, el color también: si se
+    quita el último, los demás no cambian."""
+    if 0 <= indice < len(_PALETA):
+        return _PALETA[indice]
+    import colorsys
+    tono = (270.0 + indice * 137.508) % 360.0
+    if 60.0 <= tono < 165.0:
+        tono = (tono + 100.0) % 360.0
+    r, g, b = colorsys.hsv_to_rgb(tono / 360.0, 0.4, 1.0)
+    return int(r * 255), int(g * 255), int(b * 255)
+
 
 #: Dónde nace el n-ésimo producto de un área, como fracción del ancho de la
 #: balda: de izquierda a derecha, como van las marcas en el estante, y a
@@ -222,7 +255,7 @@ class ProductosAnaquel:
 
     # ── Dibujo ──────────────────────────────────────────────────────────
     def pintar(self, painter: Any, escalar: Callable[[int, int], Any],
-               radio: int = RADIO,
+               radio: float = RADIO,
                activo: Optional[Tuple[int, int]] = None) -> None:
         """Contorno violeta, esquinas y nombre de cada producto.
 
@@ -230,11 +263,11 @@ class ProductosAnaquel:
         izquierda: encima de ella está el rótulo del área, y los dos
         rótulos se pisarían.
         """
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import QPointF, Qt
         from PySide6.QtGui import QBrush, QColor, QPen
 
-        color = QColor(*_COLOR_RGB)
         for i, p in enumerate(self.productos):
+            color = QColor(*color_de(i))
             pix = [escalar(x, y) for x, y in p['puntos']]
             if len(pix) < 2:
                 continue
@@ -245,7 +278,8 @@ class ProductosAnaquel:
                 painter.setPen(QPen(Qt.black, 1))
                 painter.setBrush(QBrush(Qt.white if activo == (i, j)
                                         else color))
-                painter.drawEllipse(q, radio, radio)
+                # QPointF: el radio puede ser decimal (2,5 px, 28-oct-2026).
+                painter.drawEllipse(QPointF(q), radio, radio)
             etiqueta = self.nombre_visible(i)
             origen = pix[0]
             painter.setBrush(Qt.NoBrush)

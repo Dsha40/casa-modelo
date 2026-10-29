@@ -110,6 +110,20 @@ class Columna:
     titulo: str
     icono: str
     color: str
+    #: Tarjeta con la imagen ARRIBA, a todo el ancho y sin deformar, y el
+    #: texto debajo (20-oct-2026): la foto «antes | ahora» del stock es
+    #: apaisada y en el cuadrado de 56 px no se veía nada.
+    imagen_arriba: bool = False
+    #: Miniatura ARRIBA, sin deformar y centrada, con el texto debajo a todo
+    #: el ancho (28-oct-2026). Para recortes de personas (altos y estrechos):
+    #: en una columna estrecha, la miniatura cuadrada de 56 px a la izquierda
+    #: los aplastaba y dejaba al texto ~40 px, que se cortaba y se solapaba.
+    miniatura_arriba: bool = False
+
+
+#: Alto de la miniatura con `miniatura_arriba`: basta para reconocer a la
+#: persona sin que cada tarjeta ocupe media columna.
+_MINIATURA_ALTO = 96
 
 
 class TarjetaAlerta(QFrame):
@@ -118,15 +132,21 @@ class TarjetaAlerta(QFrame):
     Si la alerta trae `screenshot_path`, al pulsarla se abre la carpeta que la
     contiene — es la via rapida para llegar a la evidencia."""
 
-    def __init__(self, alerta: dict, color: str, parent=None):
+    def __init__(self, alerta: dict, color: str, parent=None,
+                 imagen_arriba: bool = False, miniatura_arriba: bool = False):
         super().__init__(parent)
         self._ruta = str(alerta.get('screenshot_path') or '')
         self.setFrameShape(QFrame.NoFrame)
         self.setCursor(Qt.PointingHandCursor if self._ruta else Qt.ArrowCursor)
+        # Con el nombre del objeto (28-oct-2026): un «QFrame {...}» a secas
+        # también se aplicaba a cada QLabel de dentro (una QLabel ES un
+        # QFrame), y cada línea de texto salía con su propia barra de color.
+        self.setObjectName('tarjetaAlerta')
         self.setStyleSheet(
-            f'QFrame {{ background:#1e1e1e; border-left:3px solid {color};'
+            f'#tarjetaAlerta {{ background:#1e1e1e; border-left:3px solid {color};'
             f' border-radius:4px; }}'
-            f'QFrame:hover {{ background:#282828; }}')
+            f'#tarjetaAlerta:hover {{ background:#282828; }}')
+        chico = miniatura_arriba          # texto un punto más pequeño
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(6, 5, 6, 5)
@@ -134,14 +154,24 @@ class TarjetaAlerta(QFrame):
 
         fila = QHBoxLayout()
         fila.setSpacing(6)
-        miniatura = self._miniatura(alerta)
-        if miniatura is not None:
-            fila.addWidget(miniatura)
+        if imagen_arriba:
+            imagen = self._imagen_ancha(alerta)
+            if imagen is not None:
+                raiz.addWidget(imagen)
+        elif miniatura_arriba:
+            imagen = self._miniatura_alta(alerta)
+            if imagen is not None:
+                raiz.addWidget(imagen, alignment=Qt.AlignHCenter)
+        else:
+            miniatura = self._miniatura(alerta)
+            if miniatura is not None:
+                fila.addWidget(miniatura)
 
         texto = QVBoxLayout()
         texto.setSpacing(1)
-        titular = QLabel(self._titular(alerta))
-        titular.setStyleSheet(f'color:{color}; font-weight:bold; font-size:11px;')
+        titular = _TextoAjustado(self._titular(alerta))
+        titular.setStyleSheet(f'color:{color}; font-weight:bold; '
+                              f'font-size:{10 if chico else 11}px;')
         titular.setWordWrap(True)
         texto.addWidget(titular)
 
@@ -155,15 +185,18 @@ class TarjetaAlerta(QFrame):
 
         desc = str(alerta.get('description') or '').strip()
         if desc:
-            lbl = QLabel(desc)
-            lbl.setStyleSheet('color:#bbb; font-size:10px;')
+            lbl = _TextoAjustado(desc)
+            lbl.setStyleSheet(f'color:#bbb; font-size:{9 if chico else 10}px;')
             lbl.setWordWrap(True)
             texto.addWidget(lbl)
 
         pie = self._pie(alerta)
         if pie:
-            lbl = QLabel(pie)
-            lbl.setStyleSheet('color:#777; font-size:9px;')
+            lbl = _TextoAjustado(pie)
+            lbl.setStyleSheet(f'color:#777; font-size:{8 if chico else 9}px;')
+            # Sin esto, «🕒 hora  📹 cámara» en una sola línea fijaba el
+            # ancho mínimo de la columna y el panel se salía por la derecha.
+            lbl.setWordWrap(True)
             texto.addWidget(lbl)
 
         fila.addLayout(texto, stretch=1)
@@ -240,6 +273,40 @@ class TarjetaAlerta(QFrame):
         lbl.setStyleSheet('border-radius:3px;')
         return lbl
 
+    def _miniatura_alta(self, alerta: dict) -> Optional[QLabel]:
+        """Miniatura de `_MINIATURA_ALTO` px de alto, ancho según la
+        proporción de la foto (sin deformar ni recortar)."""
+        pix = self._pixmap(alerta)
+        if pix is None:
+            return None
+        lbl = QLabel()
+        lbl.setPixmap(pix.scaledToHeight(_MINIATURA_ALTO,
+                                         Qt.SmoothTransformation))
+        lbl.setStyleSheet('border-radius:3px;')
+        return lbl
+
+    def _imagen_ancha(self, alerta: dict) -> Optional[QLabel]:
+        """La imagen a todo el ancho de la tarjeta, sin deformar."""
+        pix = self._pixmap(alerta)
+        if pix is None:
+            return None
+        lbl = _ImagenAjustada(pix)
+        lbl.setStyleSheet('border-radius:3px;')
+        return lbl
+
+    @staticmethod
+    def _pixmap(alerta: dict) -> Optional[QPixmap]:
+        b64 = alerta.get('crop_image') or alerta.get('image_base64') or ''
+        if not b64:
+            return None
+        try:
+            if ',' in b64[:40]:
+                b64 = b64.split(',', 1)[1]
+            pix = QPixmap()
+            return pix if pix.loadFromData(QByteArray(base64.b64decode(b64))) else None
+        except Exception:
+            return None
+
     def mouseReleaseEvent(self, event):
         """Abre la carpeta de la captura. Nunca lanza: si la ruta ya no existe
         o el explorador falla, no puede tumbar la interfaz."""
@@ -251,6 +318,46 @@ class TarjetaAlerta(QFrame):
             except Exception:
                 pass
         super().mouseReleaseEvent(event)
+
+
+class _TextoAjustado(QLabel):
+    """QLabel con salto de línea que pide el alto que necesita a SU ancho
+    real (28-oct-2026). En las columnas estrechas (ancho «Ignored») Qt
+    calculaba el alto para un ancho mayor y la última línea se cortaba:
+    «…Primera» sin «visita registrada»."""
+
+    def __init__(self, texto: str, parent=None):
+        super().__init__(texto, parent)
+        self.setWordWrap(True)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        alto = self.heightForWidth(event.size().width())
+        if alto > 0 and alto != self.minimumHeight():
+            self.setMinimumHeight(alto)
+
+
+class _ImagenAjustada(QLabel):
+    """Una imagen que ocupa el ancho disponible y escala su alto con la
+    proporción original (una QLabel con `setScaledContents` deforma)."""
+
+    def __init__(self, pix: QPixmap, parent=None):
+        super().__init__(parent)
+        self._pix = pix
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumWidth(40)
+        self._ajustar(120)
+
+    def _ajustar(self, ancho: int) -> None:
+        ancho = max(40, ancho)
+        alto = max(1, round(self._pix.height() * ancho / max(1, self._pix.width())))
+        self.setFixedHeight(alto)
+        self.setPixmap(self._pix.scaled(ancho, alto, Qt.KeepAspectRatio,
+                                        Qt.SmoothTransformation))
+
+    def resizeEvent(self, event):
+        self._ajustar(event.size().width())
+        super().resizeEvent(event)
 
 
 class ColumnaAlertas(QWidget):
@@ -268,8 +375,13 @@ class ColumnaAlertas(QWidget):
         raiz.setSpacing(4)
 
         cab = QWidget()
-        cab.setStyleSheet(f'background:#252525; border-top:2px solid '
-                          f'{columna.color}; border-radius:3px;')
+        # Con selector (28-oct-2026): sin él, el borde superior y el fondo
+        # se aplicaban también al icono, al título y al contador, y el
+        # título salía metido en su propia caja y cortado.
+        cab.setObjectName('cabColumna')
+        cab.setAttribute(Qt.WA_StyledBackground, True)
+        cab.setStyleSheet(f'#cabColumna {{ background:#252525; border-top:2px solid '
+                          f'{columna.color}; border-radius:3px; }}')
         cl = QHBoxLayout(cab)
         cl.setContentsMargins(6, 4, 6, 4)
         cl.setSpacing(5)
@@ -307,13 +419,21 @@ class ColumnaAlertas(QWidget):
 
         self.scroll.setWidget(cont)
         raiz.addWidget(self.scroll, stretch=1)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Horizontal «Ignored» (20-oct-2026): con «Expanding» la suma de los
+        # anchos mínimos de las columnas (cabecera, tarjetas) pasaba del
+        # ancho del panel y la última columna se cortaba por la derecha. Así
+        # las columnas se reparten el ancho que hay y el texto salta de línea.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.setMinimumWidth(60)
 
     def anadir(self, alerta: dict) -> None:
         """Inserta la alerta arriba del todo (lo mas reciente primero)."""
         if self.vacio is not None:
             self.vacio.setVisible(False)
-        self.lista.insertWidget(0, TarjetaAlerta(alerta, self.columna.color))
+        self.lista.insertWidget(0, TarjetaAlerta(
+            alerta, self.columna.color,
+            imagen_arriba=self.columna.imagen_arriba,
+            miniatura_arriba=self.columna.miniatura_arriba))
         self._n += 1
         self.contador.setText(str(self._n))
         # Descartar las mas viejas para que la memoria no crezca sin limite.
