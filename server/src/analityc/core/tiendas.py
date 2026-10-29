@@ -34,6 +34,7 @@ from . import clasificador_uniforme
 from . import personal_descuento
 from . import personal_mapa
 from . import costura_sombra
+from . import calor_diferido
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
 from .analytics.demographics import (DemographicsClassifier,
@@ -2469,12 +2470,13 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                                     and hasattr(self, '_heatmap')
                                     and self._heatmap is not None):
                                 self._heatmap.observar_escena(inference_image)
-                                if not (self.active_tracks.get(tid_p)
-                                        or {}).get('es_personal'):
-                                    self._heatmap.add_person(
-                                        box,
-                                        inference_image.shape[1],
-                                        inference_image.shape[0])
+                                # DIFERIDO (22-oct-2026, `calor_diferido.py`):
+                                # se decide al acabar el seguimiento si su calor
+                                # es de cliente o de personal; antes, lo de
+                                # antes de la marca iba al de clientes.
+                                calor_diferido.de(camera_id).anotar(
+                                    tid_p, box, inference_image.shape[1],
+                                    inference_image.shape[0])
 
                 if self.debug_mode and detections:
                     print(f"📊 Frame {self.frame_counter}: {len(detections)} detectados ({staff_detected} con track)")
@@ -2538,6 +2540,15 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 for _tid_d in _deshechos:
                     # Unión deshecha (era otra persona): que abra su ficha.
                     getattr(self, '_captured_ids', set()).discard(_tid_d)
+                # Reparto del calor diferido (22-oct-2026): ya se sabe quién
+                # es personal (uniforme, costura) en esta imagen.
+                if (AnalyticsConfig.HEATMAP_ENABLED
+                        and getattr(self, '_heatmap', None) is not None):
+                    calor_diferido.de(camera_id).repartir(
+                        self.active_tracks, self._heatmap,
+                        lambda: personal_mapa.mapa(camera_id, getattr(
+                            self, '_camera_display_name', None)),
+                        personal_mapa.es_de_camiseta)
                 # Permanencia PROPIA del personal de camiseta (19-oct-2026).
                 personal_mapa.permanencia(camera_id).observar(self.active_tracks)
 
