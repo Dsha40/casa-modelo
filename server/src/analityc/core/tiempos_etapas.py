@@ -18,8 +18,14 @@ su tiempo PROPIO: si una etapa cronometrada llama a otra, el tiempo de la
 de dentro se le resta a la de fuera, así la suma de etapas = el total y
 nada se cuenta dos veces. Lo que no cae en ninguna etapa va a «resto».
 
-Una línea por imagen: `{"t", "total_ms", "etapas": {...}, "personas",
-"pose_personas"}`. Diagnóstico: no dejarlo puesto (una línea por imagen).
+Una línea por imagen: `{"t", "total_ms", "etapas": {...}, "cpu": {...},
+"personas", "pose_personas"}`. Diagnóstico: no dejarlo puesto (una línea
+por imagen).
+
+`cpu` (29-oct-2026): ms de PROCESADOR del hilo en cada etapa
+(`time.thread_time`). Lo que la etapa dura de más es espera: casi siempre a
+la GPU (o a otro hilo). En Windows ese reloj va a saltos de ~15,6 ms: una
+imagen sola no dice nada, la MEDIA de miles sí.
 """
 from __future__ import annotations
 
@@ -77,6 +83,16 @@ _OBJETIVOS = [
      '_update_captures_demographics', 'fichas y fotos'),
     ('src.analityc.core.anaqueles_stock', 'VigilanteStock', 'vigilar',
      'stock'),
+    # 29-oct-2026: lo que se añadió después del 6-oct.
+    ('src.analityc.core.clasificador_uniforme', 'VotoUniforme', 'observar',
+     'uniforme'),
+    ('src.analityc.core.costura_sombra', 'CosturaSombra', 'observar',
+     'costura'),
+    ('src.analityc.core.revision_cruces', 'RevisionCruces', 'observar',
+     'cruces'),
+    ('src.analityc.core.cortes_video', None, 'congelada', 'imagen congelada'),
+    ('src.analityc.core.zonas_ignorar', None, 'filtrar', 'zonas a ignorar'),
+    ('src.analityc.core.filtro_fondo', None, 'filtrar', 'filtro del fondo'),
 ]
 
 _local = threading.local()
@@ -108,7 +124,7 @@ def _envolver(funcion, etapa: str):
         pila = _pila()
         es_total = etapa == 'TOTAL' and not pila
         if es_total:
-            _local.imagen = {'etapas': {}}
+            _local.imagen = {'etapas': {}, 'cpu': {}}
         if etapa == 'pose' and funcion.__name__ == 'munecas_lote' \
                 and len(args) > 2:
             anotar('pose_personas', len(args[2]))
@@ -117,24 +133,27 @@ def _envolver(funcion, etapa: str):
             # Personas que ve el anaquel en esta imagen (tracks de persona).
             anotar('personas', sum(1 for tr in args[2].values()
                                    if tr.get('class', -1) == -1))
-        marco = [etapa, time.perf_counter(), 0.0]   # etapa, inicio, hijos
+        # etapa, inicio, hijos, CPU al inicio, CPU de los hijos
+        marco = [etapa, time.perf_counter(), 0.0, time.thread_time(), 0.0]
         pila.append(marco)
         try:
             return funcion(*args, **kwargs)
         finally:
             pila.pop()
             dur = time.perf_counter() - marco[1]
+            cpu = time.thread_time() - marco[3]
             img = _imagen()
             if img is not None:
                 propio = (dur - marco[2]) * 1000.0
-                if etapa != 'TOTAL':
-                    e = img['etapas']
-                    e[etapa] = e.get(etapa, 0.0) + propio
-                else:
-                    img['etapas']['resto'] = \
-                        img['etapas'].get('resto', 0.0) + propio
+                propio_cpu = (cpu - marco[4]) * 1000.0
+                nombre = etapa if etapa != 'TOTAL' else 'resto'
+                e = img['etapas']
+                e[nombre] = e.get(nombre, 0.0) + propio
+                c = img['cpu']
+                c[nombre] = c.get(nombre, 0.0) + propio_cpu
             if pila:
                 pila[-1][2] += dur
+                pila[-1][4] += cpu
             if es_total and img is not None:
                 img['total_ms'] = dur * 1000.0
                 img['t'] = time.time()
@@ -147,6 +166,7 @@ def _envolver(funcion, etapa: str):
 def _escribir(img: Dict[str, Any]) -> None:
     try:
         img['etapas'] = {k: round(v, 2) for k, v in img['etapas'].items()}
+        img['cpu'] = {k: round(v, 2) for k, v in img['cpu'].items()}
         img['total_ms'] = round(img['total_ms'], 2)
         with _candado:
             _fichero.write(json.dumps(img, ensure_ascii=False) + '\n')

@@ -61,6 +61,43 @@ def test_cada_etapa_cuenta_su_tiempo_propio(tmp_path, monkeypatch):
     assert abs(sum(e.values()) - lineas[0]['total_ms']) < 1.0
 
 
+def test_separa_procesador_de_espera(tmp_path, monkeypatch):
+    """29-oct-2026: `cpu` cuenta el procesador del hilo, no la espera. 200 ms
+    por etapa: en Windows ese reloj va a saltos de ~15,6 ms, y con el PC
+    ocupado el hilo no siempre tiene el procesador (medido: 78 de 120 ms y
+    125-140 de 200): por eso el listón de «calcula» es bajo."""
+    m = types.ModuleType('falso_cpu')
+
+    def calcula():                      # procesador todo el rato
+        fin = time.perf_counter() + 0.2
+        while time.perf_counter() < fin:
+            pass
+
+    def espera():                       # como esperar a la GPU
+        time.sleep(0.2)
+
+    def imagen():
+        m.calcula()
+        m.espera()
+
+    m.calcula, m.espera, m.imagen = calcula, espera, imagen
+    monkeypatch.setitem(sys.modules, 'falso_cpu', m)
+    monkeypatch.setattr(te, '_OBJETIVOS', [
+        ('falso_cpu', None, 'imagen', 'TOTAL'),
+        ('falso_cpu', None, 'calcula', 'calcula'),
+        ('falso_cpu', None, 'espera', 'espera')])
+    monkeypatch.setattr(te, '_fichero', None)
+    ruta = tmp_path / 'cpu.jsonl'
+    monkeypatch.setenv(te.VARIABLE, str(ruta))
+    assert te.instalar()
+    m.imagen()
+    te._fichero.close()
+    linea = json.loads(ruta.read_text('utf-8').splitlines()[0])
+    assert linea['cpu']['calcula'] >= 50
+    assert linea['cpu']['espera'] < 40
+    assert linea['etapas']['espera'] >= 180
+
+
 def test_sin_la_variable_no_se_toca_nada(monkeypatch):
     m = _modulo_falso(monkeypatch)
     monkeypatch.delenv(te.VARIABLE, raising=False)
