@@ -2438,7 +2438,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                             # cámara. En cenital `_aspect_min`=0.0 lo desactiva,
                             # porque una persona vista desde arriba se ve más
                             # ancha que alta y aquí se descartaría.
-                            if _aspect_min > 0.0 and bh < bw * _aspect_min:
+                            # Salvo en el borde de abajo (26-oct-2026,
+                            # `filtro_fondo.forma_valida`): gente cortada.
+                            if not filtro_fondo.forma_valida(
+                                    box, _aspect_min, inference_image.shape[0]):
                                 continue
 
                             # Offset de track_id unico por camara (anti-colision

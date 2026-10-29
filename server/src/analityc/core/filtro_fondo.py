@@ -76,6 +76,29 @@ def mascara(detecciones: Any, alto_min: Any, camera_id: Any = None) -> Any:
         return todas
 
 
+def forma_valida(caja: Any, aspecto_min: float, alto_imagen: Any = None) -> bool:
+    """¿La caja pasa el filtro de forma (alto >= `aspecto_min` x ancho)?
+
+    26-oct-2026: las cajas que tocan el borde de ABAJO de la imagen (a menos
+    de `ASPECTO_EXENTO_BORDE_PX`) pasan siempre. Un empleado agachado en la
+    balda baja, pegado a la cámara y cortado por el borde, sale más ancho que
+    alto la mitad del tiempo: el filtro lo escondía a ratos (en la grabación
+    del 26-oct, visible 16,8 de 56 s; sin el filtro en el borde, 29,9) y cada
+    vez volvía con otro número."""
+    try:
+        x1, y1, x2, y2 = (float(v) for v in caja[:4])
+    except (TypeError, ValueError):
+        return True
+    if aspecto_min <= 0.0 or (y2 - y1) >= (x2 - x1) * aspecto_min:
+        return True
+    try:
+        from .analytics.config import AnalyticsConfig
+        borde = float(getattr(AnalyticsConfig, 'ASPECTO_EXENTO_BORDE_PX', 0) or 0)
+    except Exception:                                       # noqa: BLE001
+        borde = 0.0
+    return bool(borde > 0 and alto_imagen and y2 >= float(alto_imagen) - borde)
+
+
 def filtrar(detecciones: Any, alto_min: Any, camera_id: Any = None) -> Any:
     """Las detecciones con alto >= `alto_min` px. Con `alto_min` 0/None, o
     sin detecciones, devuelve lo mismo que recibe. Nunca lanza: si algo

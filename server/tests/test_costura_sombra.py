@@ -272,6 +272,20 @@ def test_sin_huella_inmediata_esos_trozos_no_se_unen(tmp_path, monkeypatch):
     assert _corte_sin_huella_del_pipeline(tmp_path, 255) == []
 
 
+def test_forma_valida_salvo_en_el_borde_de_abajo(monkeypatch):
+    from src.analityc.core import filtro_fondo as ff
+    from src.analityc.core.analytics.config import AnalyticsConfig
+    ancha_medio = [100, 300, 300, 400]                      # alto 100, ancho 200
+    ancha_borde = [100, 500, 300, 595]                      # toca el borde (600)
+    alta = [100, 100, 200, 400]
+    assert ff.forma_valida(alta, 0.8, 600)
+    assert not ff.forma_valida(ancha_medio, 0.8, 600)
+    assert ff.forma_valida(ancha_borde, 0.8, 600)
+    assert ff.forma_valida(ancha_medio, 0.0, 600)           # filtro apagado
+    monkeypatch.setattr(AnalyticsConfig, 'ASPECTO_EXENTO_BORDE_PX', 0)
+    assert not ff.forma_valida(ancha_borde, 0.8, 600)       # como antes
+
+
 # ── Sin rebote (26-oct-2026) ────────────────────────────────────────────
 def _ver(c, tracks, t, fc):
     for v in tracks.values():

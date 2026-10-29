@@ -412,6 +412,11 @@ class AnalyticsConfig:
     # Sin uniones de ida y vuelta (A->B y luego B->A) (26-oct-2026,
     # `costura_sombra._sin_rebote`). ELDE_COSTURA_SIN_REBOTE=0 la apaga.
     COSTURA_SIN_REBOTE: bool = True
+    # Filtro de forma (alto/ancho del perfil de ángulo) SIN aplicar a las cajas
+    # que tocan el borde de ABAJO de la imagen (26-oct-2026): ahí la gente está
+    # pegada a la cámara y cortada (agachada en la balda baja), no es una caja
+    # falsa ancha. 0 = el filtro para todos, como antes.
+    ASPECTO_EXENTO_BORDE_PX: int = 30
     # Revisar el género tras un CRUCE de cajas, EN SOMBRA (22-oct-2026,
     # `revision_cruces.py`): solo apunta si cambiaría la etiqueta. Idea del
     # usuario tras ver un «Mujer» pegado a un hombre. ELDE_REVISION_CRUCES=0
@@ -747,7 +752,11 @@ class AnalyticsConfig:
     # Pausar el seguimiento durante los cortes de video de iVMS (13-oct-2026,
     # `cortes_video.py`). APAGADO por decision del usuario («que sea algo
     # opcional por los momentos»); tambien con ELDE_CONGELAR_CORTES=1.
-    CONGELAR_EN_CORTES: bool = False
+    # 26-oct-2026: ENCENDIDO a prueba (lo pidió el usuario). Del viernes 23-oct
+    # 12:10 al lunes iVMS mandó la imagen congelada (una clienta a las
+    # 12:08:49) y, de noche, la gris: 128 fichas falsas. ELDE_CONGELAR_CORTES=0
+    # vuelve a apagarlo.
+    CONGELAR_EN_CORTES: bool = True
     DEMO_B_SEGURIDAD: float = 0.95
     # «Cara propia» (14-oct-2026, `clasificador_b._EspiaYuNet`): solo la
     # cara que cae en la cabeza de esa persona, no la del vecino. Banco con

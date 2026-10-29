@@ -33,8 +33,11 @@ def _img(valor):
     return im
 
 
-def test_apagado_por_defecto_y_se_enciende_con_la_variable(monkeypatch):
+def test_encendido_por_defecto_y_se_apaga_con_la_variable(monkeypatch):
+    """26-oct-2026: encendido a prueba (antes, apagado por defecto)."""
     monkeypatch.delenv('ELDE_CONGELAR_CORTES', raising=False)
+    assert cv_.activo() is True
+    monkeypatch.setenv('ELDE_CONGELAR_CORTES', '0')
     assert cv_.activo() is False
     monkeypatch.setenv('ELDE_CONGELAR_CORTES', '1')
     assert cv_.activo() is True
