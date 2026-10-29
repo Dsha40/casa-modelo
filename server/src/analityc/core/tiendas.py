@@ -33,6 +33,7 @@ from . import ritmo_imagenes
 from . import clasificador_uniforme
 from . import personal_descuento
 from . import personal_mapa
+from . import genero_v2
 from . import costura_sombra
 from . import revision_cruces
 from . import presupuesto_imagen
@@ -2504,6 +2505,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 if AnalyticsConfig.CAPTURE_DETECTIONS:
                     self._capture_established_tracks(inference_image)
                     self._update_captures_demographics()
+                    # Género v2 en las fichas ya cerradas (27-oct-2026).
+                    genero_v2.aplicar(self)
 
                 # Resolucion de identidad (Hito 4): tracker_id -> persistent_id
                 # (confirmado por rostro) o id provisional. Va DESPUES de la

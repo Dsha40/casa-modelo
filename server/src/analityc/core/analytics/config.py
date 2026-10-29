@@ -415,6 +415,11 @@ class AnalyticsConfig:
     # Presupuesto de tareas pesadas por imagen (26-oct-2026,
     # `presupuesto_imagen.py`). PRUEBA: APAGADO; ELDE_PRESUPUESTO_IMAGEN=1.
     PRESUPUESTO_IMAGEN: bool = False
+    # Género v2 (27-oct-2026, `genero_v2.py`): 2ª opinión «Hombre» -> «Mujer»
+    # (>= 0,90) y género de las indecisas (>= 0,95) con nuestro modelo sobre
+    # la foto de la ficha. Medido en dos exámenes limpios (23 y 26-oct): de
+    # 60 % a 87 % de gente con género al mismo 93,4 %. ELDE_GENERO_V2=0 apaga.
+    GENERO_V2: bool = True
     # Filtro de forma (alto/ancho del perfil de ángulo) SIN aplicar a las cajas
     # que tocan el borde de ABAJO de la imagen (26-oct-2026): ahí la gente está
     # pegada a la cámara y cortada (agachada en la balda baja), no es una caja
