@@ -392,6 +392,27 @@ class AnalyticsConfig:
     PERSONAL_UNIFORME_UMBRAL: float = 0.50
     PERSONAL_UNIFORME_MAYORIA: float = 0.50
 
+    # ── Unir seguimientos cortados, en sombra (20-oct-2026) ──
+    # `costura_sombra.py`: solo apunta las uniones que haría. Pausada el
+    # 20-oct (configurando varias cámaras) y reactivada el 21-oct a petición
+    # del usuario. Se pausa con False o con la variable ELDE_COSTURA_SOMBRA=0.
+    COSTURA_SOMBRA_ACTIVA: bool = True
+    # Detección de saltos de vídeo dentro de la costura (21-oct-2026):
+    # apagada a petición del usuario (en el vídeo actual casi no hay saltos y
+    # con mucha gente se dispara de más). El código sigue ahí: True la vuelve.
+    COSTURA_DETECTAR_SALTOS: bool = False
+    # MODO ACTIVO (22-oct-2026): tras revisar 61 uniones (58 bien; clientes
+    # 41 de 44), el seguimiento nuevo HEREDA la identidad del anterior.
+    # False = vuelve a solo apuntar (sombra). También ELDE_COSTURA_UNIR=0.
+    COSTURA_UNIR: bool = True
+    # Huella del cuerpo al APARECER y al PERDERSE cada número, para la
+    # costura (26-oct-2026, `costura_sombra._huella_inmediata`): los trozos
+    # de ~1 s no llegaban a tener huella. ELDE_COSTURA_HUELLA_INMEDIATA=0.
+    COSTURA_HUELLA_INMEDIATA: bool = True
+    # Sin uniones de ida y vuelta (A->B y luego B->A) (26-oct-2026,
+    # `costura_sombra._sin_rebote`). ELDE_COSTURA_SIN_REBOTE=0 la apaga.
+    COSTURA_SIN_REBOTE: bool = True
+
     # ── Suavizado demografico POR PERSONA (persistent_id) — Hito 6 ──
     # Cada lectura demografica comiteada (ya suavizada por track) se acumula
     # como VOTO en el registro de la persona: genero por voto ponderado por

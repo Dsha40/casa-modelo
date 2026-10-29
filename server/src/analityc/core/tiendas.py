@@ -33,6 +33,7 @@ from . import ritmo_imagenes
 from . import clasificador_uniforme
 from . import personal_descuento
 from . import personal_mapa
+from . import costura_sombra
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
 from .analytics.demographics import (DemographicsClassifier,
@@ -1914,6 +1915,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     if crop is not None:
                         emb = body.compute_embedding(crop)
                         if emb is not None:
+                            track['_emb_cuerpo'] = emb    # costura_sombra.py
                             body.enroll(uid, emb)
                             # ¿Viste un uniforme enrolado? (identifica de
                             # espaldas; el rostro no puede)
@@ -1926,6 +1928,7 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 if crop is not None:
                     emb = body.compute_embedding(crop)
                     if emb is not None:
+                        track['_emb_cuerpo'] = emb        # costura_sombra.py
                         # ¿Viste un uniforme enrolado? Funciona TAMBIEN para
                         # los prov: (de espaldas, sin rostro que confirmar).
                         self._marcar_si_uniforme(track, emb)
@@ -1951,6 +1954,11 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     track['es_personal'] = False
                     self._confirmed_unique.add(matched)
                 _links += 1
+            elif track.get('_heredado'):
+                # Unido a un seguimiento anterior por `costura_sombra.py`
+                # (modo activo, 22-oct-2026): conserva la identidad heredada.
+                track['persistent_id'], track['persistent_confirmed'] = track['_heredado']
+                track['identity_source'] = 'costura'
             else:
                 # Sin rostro ni match corporal -> provisional (no cuenta como
                 # unico definitivo hasta confirmarse).
@@ -2505,6 +2513,31 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 # por persistent_id con anti-rebote -> visitantes unicos del
                 # area + entradas/salidas exactas (no infladas).
                 self._process_zone_transitions()
+                # Unir seguimientos cortados, EN SOMBRA (20-oct-2026,
+                # `costura_sombra.py`): solo apunta lo que uniría.
+                # Huella inmediata de la costura (26-oct-2026): con el MISMO
+                # OSNet del reidentificador corporal.
+                _body_c = getattr(self, '_body_reidentifier', None)
+                if _body_c is not None and getattr(_body_c, 'is_available', False):
+                    costura_sombra.poner_huella(_body_c.compute_embedding)
+                for _tid_a, _tid_b in costura_sombra.observar(
+                        camera_id, inference_image, self.active_tracks,
+                        self.frame_counter):
+                    # Unido de verdad (modo activo): si el anterior ya tenía
+                    # ficha, el nuevo no abre otra.
+                    if (_tid_a in getattr(self, '_captured_ids', ())
+                            or _tid_a in (getattr(self, '_capture_meta', None) or {})):
+                        self._captured_ids.add(_tid_b)
+                _conf, _deshechos = costura_sombra.resueltos(camera_id)
+                for _tid_p in _conf:
+                    # Heredó la marca de PERSONAL y sus votos la confirmaron:
+                    # la misma limpieza que si lo marcara el uniforme. Sin
+                    # esto (22-oct, 12:41:22 en vivo) el número nuevo abría
+                    # ficha de cliente y la conservaba.
+                    personal_descuento.tras_costura(self, _tid_p, camera_id)
+                for _tid_d in _deshechos:
+                    # Unión deshecha (era otra persona): que abra su ficha.
+                    getattr(self, '_captured_ids', set()).discard(_tid_d)
                 # Permanencia PROPIA del personal de camiseta (19-oct-2026).
                 personal_mapa.permanencia(camera_id).observar(self.active_tracks)
 

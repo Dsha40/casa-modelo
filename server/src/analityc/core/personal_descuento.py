@@ -125,3 +125,16 @@ def descontar(proc: Any, tid: Any, camera_id: Any, ts: float | None = None) -> N
             logger.info('personal: %s sin visita ni conteos de hoy', pid)
     except Exception as exc:                                # noqa: BLE001
         logger.warning('personal: no se pudo descontar %s: %s', tid, exc)
+
+
+def tras_costura(proc: Any, tid: Any, camera_id: Any, ts: float | None = None) -> bool:
+    """Tras una unión de `costura_sombra.py` (22-oct-2026): si el seguimiento
+    nuevo HEREDÓ la marca de personal (`personal_via == 'costura'`), la misma
+    limpieza que si lo marcara el uniforme. Medido en vivo el 22-oct a las
+    12:41:22: el número nuevo de un empleado abrió ficha de cliente, heredó
+    la marca y la ficha se quedó en `persons/`. Devuelve si descontó."""
+    tr = (getattr(proc, 'active_tracks', None) or {}).get(tid) or {}
+    if tr.get('personal_via') != 'costura':
+        return False
+    descontar(proc, tid, camera_id, ts)
+    return True

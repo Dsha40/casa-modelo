@@ -339,6 +339,15 @@ _por_camara: Dict[str, VotoUniforme] = {}
 _lock_camaras = threading.Lock()
 
 
+def votos(camera_id: Any, tid: Any) -> List[float]:
+    """Los votos propios («es personal», 0-1) que lleva un seguimiento vivo.
+    Para `costura_sombra.py` (23-oct-2026): no heredar la marca de personal
+    si los propios votos del seguimiento nuevo dicen que no lleva uniforme."""
+    voto = _por_camara.get(str(camera_id))
+    v = voto._votos.get(tid) if voto is not None else None
+    return list(v['p']) if v else []
+
+
 def ficha_protegida(camera_id: Any, stem: str, tid: Any = None, via: str = '',
                     motivo: str = '') -> bool:
     """EN SOMBRA (23-oct-2026): ¿se dejaría de apartar esta ficha porque los
