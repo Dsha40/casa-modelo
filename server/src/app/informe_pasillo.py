@@ -468,7 +468,7 @@ def _datos_anaqueles(cam: str, fechas, a: float, b: float, caps,
             'ultimo_registro': registros[-1]}
 
 
-_FOTO = re.compile(r'^(\d{4}-\d{2}-\d{2})_(\d{6})_(\d+)_(\d+)(_cerca|_bajada)?\.jpg$')
+_FOTO = re.compile(r'^(\d{4}-\d{2}-\d{2})_(\d{6})_(\d+)_(\d+)(_cerca|_bajada|_surtido)?\.jpg$')
 
 
 def _separadores(img) -> List[int]:
@@ -942,18 +942,22 @@ def _sec_stock(d) -> str:
         'Se quitó 1 foto de stock tomada' if n == 1 else f'Se quitaron {n} fotos de stock tomadas')
         + ' mientras la cámara no daba vídeo (imagen gris de iVMS): no son bajadas reales.</p>')
     if not st:
-        return ('<h2 class="salto">Bajadas de stock</h2><p class="vacio">Ninguna bajada ni alerta de stock '
-                'en el periodo.</p>' + nota)
+        return ('<h2 class="salto">Stock: bajadas y reposiciones</h2><p class="vacio">Ninguna bajada, '
+                'alerta ni reposición de stock en el periodo.</p>' + nota)
     piezas = []
     for s in st:
         texto = {'bajada': 'disminuyó el stock de este producto',
                  'cerca': f'cerca de vaciarse ({s.get("bajadas") or "?"} bajadas desde la última foto de balda surtida)',
-                 'agotado': 'posible agotado: el hueco es casi total'}[s['tipo']]
+                 'agotado': 'posible agotado: el hueco es casi total',
+                 # 21-oct-2026: el surtido del personal (`tras_personal`).
+                 'surtido': 'repuesto por el personal'}[s['tipo']]
+        cual = ('antes y después de la reposición' if s['tipo'] == 'surtido'
+                else 'antes y después del agarre')
         piezas.append(f'<div class="tarjeta blanca" style="margin-bottom:12px"><img class="foto" style="max-height:200px" '
                       f'src="{_png_b64(s["imagen"])}"><div class="caja"><b>{_e(s["producto"])} ({_e(s["area"])}), '
                       f'{_dia(dt.date.fromtimestamp(s["t"]))} a las {_hora_de(s["t"])}: {texto}.</b> '
-                      'La foto compara el producto antes y después del agarre.</div></div>')
-    return '<h2 class="salto">Bajadas de stock</h2>' + ''.join(piezas) + nota
+                      f'La foto compara el producto {cual}.</div></div>')
+    return '<h2 class="salto">Stock: bajadas y reposiciones</h2>' + ''.join(piezas) + nota
 
 
 def _sec_mapas_area(d) -> str:

@@ -309,3 +309,12 @@ def test_seccion_del_personal_con_su_permanencia(tmp_path, monkeypatch):
     html = ip._sec_personal({'personal_camiseta': p})
     assert 'Personal de tienda' in html and html.count('<tr><td>') == 2
     assert ip._sec_personal({'personal_camiseta': None}) == ''
+
+
+def test_el_pdf_ensena_las_reposiciones_del_personal():
+    """21-oct-2026: el surtido (`..._surtido.jpg`) no salía en el PDF."""
+    from src.app import informe_pasillo as ip
+    assert ip._FOTO.match('2026-10-21_143116_0_2_surtido.jpg').group(5) == '_surtido'
+    html = ip._sec_stock({'stock': [{'t': 1792540000.0, 'tipo': 'surtido', 'area': 'Anaquel 1',
+                                     'producto': 'illy', 'imagen': b'x'}]})
+    assert 'repuesto por el personal' in html and 'antes y después de la reposición' in html

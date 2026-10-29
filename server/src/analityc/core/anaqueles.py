@@ -279,6 +279,23 @@ _DEFECTOS: Dict[str, Any] = {
     # Cada tantas bajadas desde la última foto de balda surtida, aviso
     # «cerca de vaciarse». 0 = sin aviso.
     'stock_bajadas_aviso': 8,
+    # SURTIDO (19-oct-2026, lo pidió el usuario): tras tocar el PERSONAL un
+    # área, un producto que cambia >= esto frente a su foto
+    # (`stock_confirmaciones` medidas seguidas) se da por surtido. SIN CALIBRAR.
+    # 22-oct-2026: 0,80 -> 0,50 -> 0,70 a petición del usuario. Con las bolsas
+    # apiladas del Anaquel 3 una reposición clara (San Antonio) dio 0,76-0,77,
+    # un simple acomodo 0,06-0,33, y Bernard/Flor/Nescafé (0,61-0,67), dudosos,
+    # quedan fuera con 0,70.
+    'stock_umbral_surtido': 0.70,
+    # El trabajo del personal en un área se da por terminado cuando lleva
+    # esto sin tocarla (22-oct-2026: antes, en cada pausa).
+    'stock_surtido_quieto_s': 30.0,
+    # PRUEBA (22-oct-2026): guarda en `stock_pruebas/` la foto de cada agarre
+    # que queda sin confirmar (no la lee ni la interfaz ni el PDF).
+    'stock_pruebas_sin_confirmar': True,
+    # Pose del personal que toca un área, como mucho cada tanto por persona:
+    # solo para ver si su MUÑECA entra (el surtido), no cuenta agarres.
+    'surtido_pose_cada_s': 0.5,
     # Foto de referencia automática de TODOS los productos, una vez al día
     # desde esta hora ('HH:MM', hora del servidor). '' = apagada.
     'stock_reinicio_diario': '07:30',
@@ -415,6 +432,10 @@ class MedidorAnaqueles:
         self.personal_tids: Dict[Any, Dict[str, Any]] = {}
         #: (clave, pid) -> ts de la última alerta emitida (cooldowns).
         self._alerta_personal_ts: Dict[Tuple[str, Any], float] = {}
+        #: pid -> última pose del personal para el «surtido» (19-oct-2026).
+        self._pose_personal_ts: Dict[Any, float] = {}
+        #: (área, pid) -> última vez que su muñeca entró («surte», 19-oct).
+        self._mano_personal_ts: Dict[Tuple[int, Any], float] = {}
         #: (área, pid) -> ts en que el pasillero empezó a tocar el área.
         self._personal_desde: Dict[Tuple[int, str], float] = {}
         #: Alertas operativas pendientes (las drena la clase Anaqueles, que
@@ -585,6 +606,7 @@ class MedidorAnaqueles:
         personas, personal = self._separar_personal(personas, reidentifier,
                                                     tracks)
         self.personal_tids = {tid: ficha for _p, tid, _b, ficha in personal}
+        self._gestos_de_personal(t)
         self._vigilar_silencio(t, bool(personas) or bool(personal))
 
         personas_por_area: Dict[int, int] = {}
@@ -676,6 +698,23 @@ class MedidorAnaqueles:
                 clientes.append((pid, tid, box))
         return clientes, personal
 
+    def _gestos_de_personal(self, t: float) -> None:
+        """Un gesto que esperaba su bajada y resulta ser de PERSONAL
+        (19-oct-2026). El modelo del uniforme marca tras 3 votos: el 19-oct a
+        las 16:36:47 un empleado (seguimiento nuevo, aún sin marcar) hizo el
+        gesto, al segundo siguiente quedó marcado, y su reposición dio 4
+        bajadas falsas y un agarre. Ahora el gesto se descarta y su área pasa
+        a vigilarse como posible SURTIDO."""
+        for ag in list(self._agarres_por_confirmar):
+            if ag['tid'] not in self.personal_tids:
+                continue
+            self._agarres_por_confirmar.remove(ag)
+            if self.cfg.get('stock_activo', True):
+                self._stock.tras_personal(ag['idx'], t)
+            logger.info("anaqueles[%s] gesto de agarre en %s (%s) descartado: "
+                        "era personal", self.camera_id, self._nombre(ag['idx']),
+                        _corto(ag['pid']))
+
     def _atender_personal(self, personal: List, t: float,
                           medir_areas: bool) -> None:
         """Alertas operativas del personal, con cooldown por persona.
@@ -683,13 +722,18 @@ class MedidorAnaqueles:
         - seguridad: «está en el pasillo» al verlo (no depende de áreas,
           así que funciona incluso con la escena en estabilización);
         - pasillero: «surte el área N» cuando su torso toca un área un
-          dwell sostenido (solo con áreas fiables: `medir_areas`).
+          dwell sostenido Y en ese rato su MUÑECA entró al área (19-oct-2026,
+          lo pidió el usuario: el cuerpo solo, de pie delante, también
+          avisaba). Solo con áreas fiables: `medir_areas`.
         """
         franja = float(self.cfg.get('franja_superior', 0.60))
         dwell_surte = float(self.cfg.get('surte_dwell_s', 3.0))
         cd_seg = float(self.cfg.get('alerta_seguridad_cooldown_s', 300.0))
         cd_surte = float(self.cfg.get('alerta_surte_cooldown_s', 180.0))
         tocadas: set = set()
+        #: pid -> (tid, box, áreas que toca): candidatos a «surtir».
+        cerca_stock: Dict[Any, Tuple[Any, Any, List[int]]] = {}
+        quien: Dict[Any, Tuple[str, str, Any]] = {}
 
         for pid, tid, box, ficha in personal:
             rol = str(ficha.get('rol') or '')
@@ -706,26 +750,79 @@ class MedidorAnaqueles:
 
             if not (medir_areas and self._poligonos):
                 continue
+            # Vigilante y mantenimiento (modelo de tipos, 19-oct-2026): solo
+            # dejan de contar; ni «surte» ni vigilancia del surtido.
+            if rol in ('vigilante', 'mantenimiento'):
+                continue
             for idx, poli in enumerate(self._poligonos):
                 if not self._toca_area(box, idx, poli, franja):
                     continue
                 clave_dwell = (idx, pid)
                 tocadas.add(clave_dwell)
-                desde = self._personal_desde.setdefault(clave_dwell, t)
-                clave_cd = (f'surte:{idx}', pid)
-                if ((t - desde) >= dwell_surte
-                        and (t - self._alerta_personal_ts.get(
-                            clave_cd, -1e12)) >= cd_surte):
-                    self._alerta_personal_ts[clave_cd] = t
-                    area = self._nombre(idx)
-                    self._evento_personal('surte', nombre, rol, area, t)
-                    self._alertas_personal.append({
-                        'tipo': 'surte', 'nombre': nombre, 'rol': rol,
-                        'pid': pid, 'box': box, 'area': area})
+                cerca_stock.setdefault(pid, (tid, box, []))[2].append(idx)
+                self._personal_desde.setdefault(clave_dwell, t)
+                quien[pid] = (nombre, rol, box)
 
         for clave in list(self._personal_desde):
             if clave not in tocadas:
                 self._personal_desde.pop(clave, None)
+                self._mano_personal_ts.pop(clave, None)
+        if cerca_stock:
+            self._munecas_personal(cerca_stock, t)
+        for clave_dwell in tocadas:
+            idx, pid = clave_dwell
+            desde = self._personal_desde[clave_dwell]
+            clave_cd = (f'surte:{idx}', pid)
+            if ((t - desde) >= dwell_surte
+                    and self._mano_personal_ts.get(clave_dwell, -1e12) >= desde
+                    and (t - self._alerta_personal_ts.get(
+                        clave_cd, -1e12)) >= cd_surte):
+                self._alerta_personal_ts[clave_cd] = t
+                nombre, rol, box = quien[pid]
+                area = self._nombre(idx)
+                self._evento_personal('surte', nombre, rol, area, t)
+                self._alertas_personal.append({
+                    'tipo': 'surte', 'nombre': nombre, 'rol': rol,
+                    'pid': pid, 'box': box, 'area': area})
+
+    def _munecas_personal(self, cerca: Dict[Any, Tuple[Any, Any, List[int]]],
+                          t: float) -> None:
+        """¿Metió la MANO el personal? (19-oct-2026, lo pidió el usuario:
+        más preciso que el cuerpo). Pose solo a quien toca un área, como
+        mucho cada `surtido_pose_cada_s` por persona; si una muñeca entra al
+        área con la profundidad del agarre, se apunta (para «surte») y el
+        stock vigila si la surtió (`VigilanteStock.tras_personal`). Nunca
+        lanza."""
+        try:
+            cada = float(self.cfg.get('surtido_pose_cada_s', 0.5))
+            orden = [(pid, v) for pid, v in cerca.items()
+                     if (t - self._pose_personal_ts.get(pid, -1e12)) >= cada]
+            orden = orden[:int(self.cfg.get('pose_max_personas', 4))]
+            if not orden:
+                return
+            cajas = [box for _pid, (_tid, box, _a) in orden]
+            lote = getattr(self.pose, 'munecas_lote', None)
+            todas = (lote(self._frame_actual, cajas) if lote is not None
+                     else [self.pose.munecas(self._frame_actual, b) for b in cajas])
+            for (pid, (_tid, box, areas)), munecas in zip(orden, todas):
+                self._pose_personal_ts[pid] = t
+                ancho = max(1.0, float(box[2]) - float(box[0]))
+                for idx in areas:
+                    prof = self._profundidad_efectiva(ancho, idx)
+                    if any(cv2.pointPolygonTest(self._poligonos[idx],
+                                                (float(m[0]), float(m[1])),
+                                                True) >= prof
+                           for m in (munecas or [])):
+                        self._mano_personal_ts[(idx, pid)] = t
+                        if self.cfg.get('stock_activo', True):
+                            self._stock.tras_personal(idx, t)
+            if len(self._pose_personal_ts) > 500:
+                self._pose_personal_ts = {
+                    p: ts for p, ts in self._pose_personal_ts.items()
+                    if (t - ts) < 60.0}
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug("anaqueles[%s]: pose del personal falló: %s",
+                         self.camera_id, exc)
 
     def _evento_personal(self, tipo: str, nombre: str, rol: str,
                          area: Optional[str], t: float) -> None:

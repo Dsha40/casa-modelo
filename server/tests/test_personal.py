@@ -296,3 +296,62 @@ def test_sin_galeria_todos_cuentan_como_clientes(tmp_path):
     for i in range(6):                            # quieto frente al área
         m.procesar(FRAME, _track('uuid-x'), ahora=t0 + i * 0.5)
     assert m.registro.area(0)['visitas'] == 1
+
+
+# ── Surtido: la MUÑECA del personal dentro del área (19-oct-2026) ────────
+class PoseFuera:
+    disponible = True
+
+    def munecas(self, frame, box):
+        return [(150, 400, 0.9)]               # mano abajo, fuera del área
+
+
+def test_el_surtido_se_vigila_solo_si_la_muneca_del_personal_entra(tmp_path):
+    for pose, esperado in ((PoseKlienta(), [0]), (PoseFuera(), [])):
+        m = _medidor_con_personal(
+            tmp_path, {'uuid-luis': {'nombre': 'Luis', 'rol': 'pasillero'}})
+        m.pose = pose
+        llamadas = []
+        m._stock.tras_personal = lambda area, t: llamadas.append(area)
+        m.procesar(FRAME, _track('uuid-luis'), ahora=1000.0)
+        m.procesar(FRAME, _track('uuid-luis'), ahora=1000.1)   # < 0,5 s: sin pose
+        assert llamadas == esperado, type(pose).__name__
+
+
+def test_surte_pide_que_la_muneca_entre_no_basta_el_cuerpo(tmp_path):
+    """19-oct-2026: de pie delante del área con la mano abajo no «surte»."""
+    m = _medidor_con_personal(
+        tmp_path, {'uuid-luis': {'nombre': 'Luis', 'rol': 'pasillero'}},
+        surte_dwell_s=3.0)
+    m.pose = PoseFuera()
+    for i in range(10):                        # 5 s frente al anaquel
+        m.procesar(FRAME, _track('uuid-luis'), ahora=1000.0 + i * 0.5)
+    assert m.drenar_alertas_personal() == []
+
+
+def test_vigilante_y_mantenimiento_del_modelo_no_surten(tmp_path):
+    """19-oct-2026 (lo pidió el usuario): solo dejan de contar."""
+    for rol in ('vigilante', 'mantenimiento'):
+        m = _medidor_con_personal(tmp_path, {'uuid-x': {'nombre': rol, 'rol': rol}},
+                                  surte_dwell_s=3.0)
+        llamadas = []
+        m._stock.tras_personal = lambda area, t: llamadas.append(area)
+        for i in range(10):
+            m.procesar(FRAME, _track('uuid-x'), ahora=1000.0 + i * 0.5)
+        assert m.drenar_alertas_personal() == [] and llamadas == [], rol
+        assert m.registro.area(0)['visitas'] == 0 and m.registro.area(0)['agarres'] == 0
+
+
+def test_gesto_pendiente_de_quien_resulta_personal_se_descarta(tmp_path):
+    """19-oct-2026, 16:36:47: el gesto llegó un segundo antes de la marca."""
+    m = _medidor_con_personal(tmp_path, {})
+    llamadas = []
+    m._stock.tras_personal = lambda area, t: llamadas.append(area)
+    m._agarres_por_confirmar = [{'idx': 0, 'pid': 'prov:7', 'tid': 7, 't': 99.0,
+                                 'genero': None, 'rango': None},
+                                {'idx': 0, 'pid': 'prov:8', 'tid': 8, 't': 99.0,
+                                 'genero': None, 'rango': None}]
+    m.personal_tids = {7: {'rol': 'pasillero'}}
+    m._gestos_de_personal(100.0)
+    assert [a['tid'] for a in m._agarres_por_confirmar] == [8]   # el cliente sigue
+    assert llamadas == [0]

@@ -88,7 +88,7 @@ _estados: Dict[str, Dict[str, Any]] = {}
 #: son la balda SURTIDA: ponen a cero la cuenta de bajadas y cierran sus
 #: alertas. «bajada» es la foto que se rehace tras una bajada confirmada,
 #: para medir la siguiente desde ahí: conserva la cuenta.
-MOTIVOS_SURTIDO = ('manual', 'diaria')
+MOTIVOS_SURTIDO = ('manual', 'diaria', 'surtido')
 
 
 def pedir_referencia(camera_id: str, area: Optional[int] = None,
@@ -365,6 +365,10 @@ class VigilanteStock:
         #: clave -> aviso «cerca de vaciarse» abierto (se cierra con la
         #: siguiente foto de balda surtida).
         self._cerca: Dict[Clave, Dict[str, Any]] = {}
+        #: área -> {'desde', 'ultima', 'rachas': {clave: (alta, baja)}}:
+        #: el PERSONAL tocó el área y se mira si la balda cambió de verdad
+        #: (19-oct-2026, `tras_personal`).
+        self._surtiendo: Dict[int, Dict[str, Any]] = {}
         #: Día ('AAAA-MM-DD') de la última foto diaria automática.
         self._dia_diaria = self._leer_dia_diaria()
         self.cambio = True        # hay algo nuevo que emitir al cliente
@@ -376,6 +380,11 @@ class VigilanteStock:
         """Un agarre confirmado en `area`: vigilar todos sus productos con
         referencia. Un agarre nuevo reinicia la vigilancia del producto.
         `persona` es el recorte de quien agarró, para la alerta."""
+        if int(area) in self._surtiendo:
+            # El personal está surtiendo esa área (19-oct-2026): su foto de
+            # antes ya no sirve para medir una bajada. El gesto queda sin
+            # confirmar antes que contar la reposición como bajada.
+            return
         if persona is not None and getattr(persona, 'size', 0):
             self._ultima_persona[int(area)] = {'img': persona, 't': float(t)}
         for clave in list(self._refs):
@@ -394,6 +403,28 @@ class VigilanteStock:
                                        'racha_bajada': 0, 'racha_baja': 0,
                                        'ultima': -1e12}
         self.cambio = True
+
+    def tras_personal(self, area: int, t: float) -> None:
+        """El PERSONAL está tocando `area` (19-oct-2026, lo pidió el
+        usuario): al apartarse, si un producto cambió >= `stock_umbral_surtido`
+        frente a su foto en `stock_confirmaciones` medidas seguidas, se da por
+        SURTIDO: suceso, foto de evidencia y foto de referencia nueva de balda
+        surtida (cuenta de bajadas a cero y sus avisos fuera). Si se queda
+        parecido, solo acomodó: nada. Lo que se vigilaba de un cliente en esa
+        área se abandona: su foto de antes ya no sirve para medir su bajada."""
+        area = int(area)
+        s = self._surtiendo.get(area)
+        if s is None:
+            self._surtiendo[area] = {'desde': float(t), 'ultima': -1e12,
+                                     'rachas': {}}
+            self.cambio = True
+        else:
+            s['desde'] = float(t)
+        # Siempre, no solo al empezar (19-oct, 16:36): un gesto llegado con
+        # la reposición en curso también mediría la balda a medio surtir.
+        for clave in [c for c in self._pendientes if c[0] == area]:
+            self._pendientes.pop(clave, None)
+            self.cambio = True
 
     def vigilar(self, frame: np.ndarray,
                 productos: Dict[int, List[Tuple[int, str, np.ndarray]]],
@@ -504,6 +535,97 @@ class VigilanteStock:
                                   cuerpos, t)
         for clave in list(self._alertas):
             self._medir_alerta(clave, frame, vivos, nombres_area, cuerpos, t)
+        for area in list(self._surtiendo):
+            self._medir_surtido(area, frame, vivos, nombres_area, cuerpos, t)
+
+    def _terminar_surtido(self, area: int, t: float) -> None:
+        """El personal terminó en `area` sin llegar al surtido: igual pudo
+        acomodar o reponer un poco (19-oct-2026, 17:20: la foto era de antes
+        de que el personal tocara el Anaquel 3 entre las 16:30 y las 16:45, y
+        el primer agarre de un cliente dio 4 bajadas falsas a la vez). Se
+        rehace la foto de los productos que no se dieron por surtidos, SIN
+        tocar la cuenta de bajadas; los que tienen un aviso abierto se dejan,
+        para no cerrarlo por un simple acomodo."""
+        s = self._surtiendo.pop(area, None) or {}
+        hechos = s.get('hechos', set())
+        claves = {c for c in self._refs if c[0] == area and c not in hechos
+                  and c not in self._alertas}
+        if claves and self.cfg.get('stock_pruebas_sin_confirmar', False):
+            # PRUEBA (22-oct-2026, lo pidió el usuario): antes y después de
+            # cada producto que el personal tocó sin llegar a «surtido», en
+            # `stock_pruebas/` (ni la interfaz ni el PDF lo leen), para ver si
+            # el 0,80 es alto para baldas de bolsas apiladas.
+            for clave in claves:
+                maximo, ahora, nombre = s.get('medidas', {}).get(clave, (0.0, None, ''))
+                if ahora is None:
+                    continue
+                try:
+                    self._guardar_evidencia(clave, self._refs[clave]['img'], ahora, None,
+                                            nombre or self._refs[clave]['nombre'], t,
+                                            tipo='acomodo', cambio=maximo,
+                                            carpeta_nombre='stock_pruebas')
+                except Exception as exc:                    # noqa: BLE001
+                    logger.debug('stock: sin foto de prueba del acomodo: %s', exc)
+        if claves:
+            self._pedir_fotos(claves, 'personal', t)
+            logger.info("stock[%s]: el personal acabó en el área %d; foto nueva "
+                        "de %d producto(s) (sin tocar la cuenta de bajadas)",
+                        self.camera_id, area, len(claves))
+
+    def _medir_surtido(self, area, frame, vivos, nombres_area, cuerpos,
+                       t) -> None:
+        s = self._surtiendo[area]
+        if (t - s['desde']) > float(self.cfg.get('stock_ventana_s', 180.0)):
+            self._terminar_surtido(area, t)
+            return
+        if ((t - s['desde']) < float(self.cfg.get('stock_espera_s', 2.0))
+                or (t - s['ultima']) < float(self.cfg.get('stock_muestreo_s', 1.0))):
+            return
+        s['ultima'] = t
+        umbral = float(self.cfg.get('stock_umbral_surtido', 0.80))
+        n = int(self.cfg.get('stock_confirmaciones', 3))
+        claves = [c for c in self._refs if c[0] == area and c in vivos]
+        hechos = s.setdefault('hechos', set())
+        for clave in claves:
+            if clave in hechos:
+                continue                # ya dado por surtido
+            cambio = self._cambio_de(clave, frame, cuerpos)
+            if cambio is None:
+                continue                # tapado: se espera
+            # Para la foto de PRUEBA del acomodo (22-oct-2026): la última
+            # medida sin nadie delante y el cambio más alto visto.
+            x1, y1, x2, y2 = self._refs[clave]['caja']
+            previo = s.setdefault('medidas', {}).get(clave, (0.0, None, ''))
+            s['medidas'][clave] = (max(previo[0], float(cambio)),
+                                   frame[y1:y2, x1:x2].copy(), vivos[clave][0])
+            alta, baja = s['rachas'].get(clave, (0, 0))
+            alta, baja = (alta + 1, 0) if cambio >= umbral else (0, baja + 1)
+            s['rachas'][clave] = (alta, baja)
+            if alta < n:
+                continue
+            nombre = vivos[clave][0]
+            area_nombre = nombres_area.get(area, f'Área {area + 1}')
+            ref = self._refs[clave]
+            x1, y1, x2, y2 = ref['caja']
+            self._guardar_evidencia(clave, ref['img'],
+                                    frame[y1:y2, x1:x2].copy(), None, nombre,
+                                    t, tipo='surtido', cambio=cambio)
+            self._suceso('surtido', clave, nombre, nombres_area, t)
+            logger.info("stock[%s]: SURTIDO %s en %s por el personal "
+                        "(cambio %.3f); foto de balda surtida", self.camera_id,
+                        nombre, area_nombre, cambio)
+            # La foto nueva, ya sin nadie delante, cierra avisos y cuenta.
+            self._pedir_fotos({clave}, 'surtido', t)
+            hechos.add(clave)                       # una vez por producto
+        # Se acaba cuando todo se ha visto Y el personal lleva un rato sin tocar
+        # el área (22-oct-2026): repone a ratos, y al darlo por terminado en
+        # cada pausa la reposición se troceaba en 9 «acomodos» de 4 minutos,
+        # cada uno medido contra la foto tomada a mitad de la reposición.
+        quieto = float(self.cfg.get('stock_surtido_quieto_s', 30.0))
+        if (claves and (t - s['desde']) >= quieto
+                and all(c in hechos or s['rachas'].get(c, (0, 0))[1] >= n
+                        for c in claves)):
+            self._terminar_surtido(area, t)          # todo visto: se acaba
 
     def _olvidar_desaparecidos(self, vivos, forma) -> None:
         """Un producto quitado o REDIBUJADO pierde su referencia: la foto
@@ -719,7 +841,8 @@ class VigilanteStock:
     def _guardar_evidencia(self, clave: Clave, antes, ahora, persona,
                            nombre: str, t: float, tipo: str = 'agotado',
                            cambio: Optional[float] = None,
-                           bajadas: int = 0) -> Optional[Path]:
+                           bajadas: int = 0,
+                           carpeta_nombre: str = 'stock_alertas') -> Optional[Path]:
         """`stock_alertas/<fecha>_<hora>_<área>_<producto>.jpg` junto a las
         referencias (`..._cerca.jpg` para «cerca de vaciarse», `..._bajada.jpg`
         para cada bajada). Son fotos de clientes: viven en `output/`, fuera
@@ -727,14 +850,20 @@ class VigilanteStock:
         cuenta de bajadas (12-oct-2026): el dashboard los enseña también
         cuando la alerta ya no está en memoria."""
         try:
-            carpeta = self._carpeta.parent / 'stock_alertas'
+            carpeta = self._carpeta.parent / carpeta_nombre
             carpeta.mkdir(parents=True, exist_ok=True)
-            sufijo = {'cerca': '_cerca', 'bajada': '_bajada'}.get(tipo, '')
+            sufijo = {'cerca': '_cerca', 'bajada': '_bajada',
+                      'surtido': '_surtido',
+                      'sin_confirmar': '_sin_confirmar',
+                      'acomodo': '_acomodo'}.get(tipo, '')
             ruta = carpeta / (time.strftime('%Y-%m-%d_%H%M%S',
                                             time.localtime(t))
                               + f'_{clave[0]}_{clave[1]}{sufijo}.jpg')
             titulo = {'cerca': 'Cerca de vaciarse',
-                      'bajada': f'Bajada {bajadas}'}.get(tipo, 'Posible agotado')
+                      'bajada': f'Bajada {bajadas}',
+                      'surtido': 'Surtido por el personal',
+                      'sin_confirmar': 'Agarre SIN confirmar (prueba)',
+                      'acomodo': 'Personal: acomodo, no surtido (prueba)'}.get(tipo, 'Posible agotado')
             img = componer_evidencia(antes, ahora, persona, nombre, titulo)
             ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 88])
             if not ok:
@@ -766,6 +895,7 @@ class VigilanteStock:
         if cambio is None:
             return
         p['ultima'] = t
+        p['max_cambio'] = max(float(p.get('max_cambio', 0.0)), float(cambio))
         umbral = float(self.cfg.get('stock_umbral', 0.45))
         umbral_bajada = float(self.cfg.get('stock_umbral_bajada', 0.25))
         n = int(self.cfg.get('stock_confirmaciones', 3))
@@ -812,6 +942,22 @@ class VigilanteStock:
         elif p['racha_baja'] >= n:
             self._pendientes.pop(clave, None)      # sigue surtido
             self.cambio = True
+            # PRUEBA (22-oct-2026, lo pidió el usuario): foto del agarre que
+            # se queda «sin confirmar», APARTE (`stock_pruebas/`): ni la
+            # interfaz ni el PDF la leen. Para revisar en el chat por qué las
+            # bolsas de Bernard/San Domingo casi no cambian la foto.
+            if self.cfg.get('stock_pruebas_sin_confirmar', False):
+                try:
+                    ref = self._refs[clave]
+                    x1, y1, x2, y2 = ref['caja']
+                    persona = self._ultima_persona.get(clave[0])
+                    self._guardar_evidencia(
+                        clave, ref['img'], frame[y1:y2, x1:x2].copy(),
+                        persona['img'] if persona else None, nombre, t,
+                        tipo='sin_confirmar', cambio=p.get('max_cambio', cambio),
+                        carpeta_nombre='stock_pruebas')
+                except Exception as exc:                    # noqa: BLE001
+                    logger.debug('stock: sin foto de prueba: %s', exc)
 
     def _confirmar_bajada(self, clave, frame, nombre, nombres_area,
                           cambio, t) -> None:
