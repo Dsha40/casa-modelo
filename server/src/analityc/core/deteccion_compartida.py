@@ -117,6 +117,10 @@ class _DetectorCompartido:
             self._modelo.inference(**compilar)
         except Exception as exc:                     # noqa: BLE001
             logger.warning("RF-DETR compartido sin compilar (eager): %s", exc)
+        # Grafo de CUDA del modelo (29-oct-2026, `detector_grafo.py`): apagado
+        # salvo ELDE_GRAFO_DETECTOR=1.
+        from . import detector_grafo
+        detector_grafo.instalar(self._modelo)
         self._id91_a_pseudo: Dict[int, int] = {
             i: NOMBRE_A_PSEUDO[n]
             for i, n in COCO_CLASSES.items() if n in NOMBRE_A_PSEUDO}

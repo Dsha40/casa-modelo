@@ -71,6 +71,10 @@ class GrafosPorLote:
             g, estatica, salida = grafo
             estatica.copy_(entrada)
             g.replay()
+            # Un modelo puede devolver varias salidas (el detector RF-DETR
+            # da cajas y puntuaciones, 29-oct-2026): se copia cada una.
+            if isinstance(salida, (tuple, list)):
+                return type(salida)(t.clone() for t in salida)
             return salida.clone()
         except Exception as exc:                            # noqa: BLE001
             self._roto = True

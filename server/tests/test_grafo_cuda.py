@@ -81,3 +81,32 @@ def test_tras_un_fallo_no_se_reintenta(monkeypatch):
     assert grafos.ejecutar(x) is None
     assert grafos.ejecutar(x) is None
     assert llamadas == [1]
+
+
+class _DosSalidas(torch.nn.Module):
+    """Como RF-DETR: devuelve una tupla (cajas, puntuaciones)."""
+
+    def __init__(self):
+        super().__init__()
+        self.m = _modelo()
+
+    def forward(self, x):
+        y = self.m(x)
+        return y * 2, y + 1
+
+
+def test_varias_salidas_se_copian_todas(monkeypatch):
+    """29-oct-2026 (detector con grafo): una tupla de salidas, cada una
+    igual que sin grafo y sin que la pise la siguiente repetición."""
+    monkeypatch.delenv(gc.VARIABLE, raising=False)
+    m = _DosSalidas().cuda().eval()
+    grafos = gc.GrafosPorLote(m)
+    x = torch.rand(1, 3, 32, 32, device='cuda')
+    with torch.no_grad():
+        esperado = m(x)
+    a = grafos.ejecutar(x)
+    assert isinstance(a, tuple) and len(a) == 2
+    assert all(torch.equal(p, q) for p, q in zip(a, esperado))
+    copia = tuple(t.clone() for t in a)
+    grafos.ejecutar(torch.rand(1, 3, 32, 32, device='cuda'))
+    assert all(torch.equal(p, q) for p, q in zip(a, copia))
