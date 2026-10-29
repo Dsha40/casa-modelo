@@ -284,3 +284,28 @@ def test_con_navegador_el_pdf_sale_de_verdad():
         pytest.skip('sin Edge/Chrome (p. ej. el servidor de Linux): sale el clásico')
     pdf = ip.a_pdf('<!doctype html><html><body><h1>Informe del pasillo</h1></body></html>')
     assert pdf is not None and pdf[:5] == b'%PDF-'
+
+
+def test_seccion_del_personal_con_su_permanencia(tmp_path, monkeypatch):
+    """19-oct-2026: el informe trae la permanencia propia del personal de
+    camiseta (`personal_mapa.py`), solo de las horas del periodo."""
+    import datetime as _dt
+    import json as _json
+    import time as _time
+    from src.app import informe_pasillo as ip
+    from src.analityc.core.anaqueles_registro import _carpeta_nombre
+    monkeypatch.setattr(ip, 'SERVIDOR', tmp_path)
+    carpeta = tmp_path / 'output' / 'personal_permanencia' / _carpeta_nombre('cam-p')
+    carpeta.mkdir(parents=True)
+    (carpeta / '2026-10-19.json').write_text(_json.dumps({'horas': {
+        '09': {'con_personal_s': 600.0, 'persona_s': 900.0},
+        '10': {'con_personal_s': 300.0, 'persona_s': 300.0},
+        '15': {'con_personal_s': 999.0, 'persona_s': 999.0}}}), encoding='utf-8')
+    f = _dt.date(2026, 10, 19)
+    a = _time.mktime(_dt.datetime(2026, 10, 19, 8).timetuple())
+    b = _time.mktime(_dt.datetime(2026, 10, 19, 12).timetuple())
+    p = ip._datos_personal('cam-p', [f], a, b)
+    assert p['con_personal_s'] == 900.0 and p['persona_s'] == 1200.0   # sin las 15h
+    html = ip._sec_personal({'personal_camiseta': p})
+    assert 'Personal de tienda' in html and html.count('<tr><td>') == 2
+    assert ip._sec_personal({'personal_camiseta': None}) == ''

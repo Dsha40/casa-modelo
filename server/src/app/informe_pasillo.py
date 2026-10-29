@@ -371,7 +371,38 @@ def _datos(con, desde: str, hasta: str, camara: Optional[str]) -> Dict[str, Any]
     except Exception as exc:                                # noqa: BLE001
         d['mapa_general'] = None
         d['errores'].append(f'mapa general: {exc}')
+    try:
+        d['personal_camiseta'] = _datos_personal(cam, fechas, a, b)
+    except Exception as exc:                                # noqa: BLE001
+        d['personal_camiseta'] = None
+        d['errores'].append(f'personal de camiseta: {exc}')
     return d
+
+
+def _datos_personal(cam: str, fechas, a: float, b: float) -> Optional[Dict[str, Any]]:
+    """Permanencia y mapa PROPIOS del personal de camiseta (19-oct-2026,
+    `personal_mapa.py`): por hora, segundos con algún empleado en el área y
+    segundos-persona. Solo las horas que empiezan dentro del periodo."""
+    from ..analityc.core.anaqueles_registro import _carpeta_nombre
+    from ..analityc.core import personal_mapa
+    carpeta = SERVIDOR / 'output' / 'personal_permanencia' / _carpeta_nombre(cam)
+    horas: List[Tuple[dt.date, int, float, float]] = []
+    for f in fechas:
+        try:
+            datos_dia = json.loads((carpeta / f'{f.isoformat()}.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        for h, v in sorted(datos_dia.get('horas', {}).items()):
+            inicio = time.mktime(dt.datetime(f.year, f.month, f.day, int(h)).timetuple())
+            if a <= inicio < b and v.get('con_personal_s'):
+                horas.append((f, int(h), float(v['con_personal_s']), float(v.get('persona_s', 0))))
+    if not horas:
+        return None
+    por_hora = Counter({(f, h): con for f, h, con, _p in horas})
+    return {'horas': horas,
+            'con_personal_s': sum(x[2] for x in horas),
+            'persona_s': sum(x[3] for x in horas),
+            'mapa': _mapa_general(personal_mapa.clave_mapa(cam), por_hora)}
 
 
 def _datos_anaqueles(cam: str, fechas, a: float, b: float, caps,
@@ -734,7 +765,7 @@ def html(d: Dict[str, Any]) -> str:
         return ''.join(partes)
     for seccion in (_sec_resumen, _sec_trafico, _sec_demografia, _sec_afluencia,
                     _sec_anaqueles, _sec_stock, _sec_mapas_area, _sec_permanencia,
-                    _sec_mapa_general):
+                    _sec_mapa_general, _sec_personal):
         try:
             partes.append(seccion(d))
         except Exception as exc:                            # noqa: BLE001
@@ -972,6 +1003,26 @@ def _sec_mapa_general(d) -> str:
 <div class="nota"><b>Pasillo, {_e(d.get('camara_corta'))}</b> — mapa de calor de la hora de las {_h12(m['hora'])} del {_dia(m['fecha'])}
 (azul: poca actividad · rojo: mucha). Suma la posición de los pies de cada persona en cada fotograma, así que quien
 se queda parado calienta más que quien cruza.</div></div>"""
+
+
+def _sec_personal(d) -> str:
+    p = d.get('personal_camiseta')
+    if not p:
+        return ''
+    filas = ''.join(f'<tr><td>{_dia(f)} · {_h12(h)}</td><td class="der">{_seg(con)}</td>'
+                    f'<td class="der">{_seg(per)}</td></tr>' for f, h, con, per in p['horas'])
+    mapa = ''
+    if p.get('mapa'):
+        m = p['mapa']
+        mapa = (f'<div class="tarjeta blanca" style="margin-top:12px"><img class="foto" style="max-height:240px" '
+                f'src="{_png_b64(m["imagen"])}"><div class="nota">Mapa de calor <b>del personal</b> de la hora '
+                f'de las {_h12(m["hora"])} del {_dia(m["fecha"])}: dónde trabajó el personal de camiseta.</div></div>')
+    return f"""<h2>Personal de tienda</h2><div class="tarjeta blanca"><table>
+<tr><th>Hora</th><th class="der">Con personal en el área</th><th class="der">Tiempo por persona sumado</th></tr>
+{filas}<tr class="tot"><td>Total</td><td class="der">{_seg(p['con_personal_s'])}</td><td class="der">{_seg(p['persona_s'])}</td></tr></table>
+<div class="nota">Lo reconoce el sistema por la camiseta de Santa Rosa (aprox. 9 de cada 10 empleados) y queda
+<b>fuera de todas las cifras de clientes</b> de este informe. «Con personal» no suma doble si hay dos a la vez;
+«por persona» sí. El vigilante y mantenimiento tampoco cuentan como clientes, pero no se incluyen aquí.</div></div>{mapa}"""
 
 
 # ── PDF ──────────────────────────────────────────────────────────────────

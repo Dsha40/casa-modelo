@@ -32,6 +32,7 @@ from . import zonas_ignorar
 from . import ritmo_imagenes
 from . import clasificador_uniforme
 from . import personal_descuento
+from . import personal_mapa
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
 from .analytics.demographics import (DemographicsClassifier,
@@ -2503,6 +2504,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 # por persistent_id con anti-rebote -> visitantes unicos del
                 # area + entradas/salidas exactas (no infladas).
                 self._process_zone_transitions()
+                # Permanencia PROPIA del personal de camiseta (19-oct-2026).
+                personal_mapa.permanencia(camera_id).observar(self.active_tracks)
 
                 # Avisos de NEGOCIO (aforo alto, pasillo dormido, caida de
                 # trafico). Va DESPUES de las transiciones porque lee el aforo
@@ -2561,6 +2564,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                         # «quemadas» en la base de todos los renders).
                         personas=len(detections)
                         if isinstance(detections, list) else None)
+                    personal_mapa.guardar_mapa(
+                        camera_id, processed_image,
+                        getattr(self, '_camera_display_name', None),
+                        len(detections) if isinstance(detections, list) else None)
                     if heatmap_activate and _draw_server:
                         processed_image = self._heatmap.render_overlay(
                             processed_image)
