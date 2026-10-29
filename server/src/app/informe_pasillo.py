@@ -396,7 +396,10 @@ def _datos_anaqueles(cam: str, fechas, a: float, b: float, caps,
     por_area = {i: [0, 0] for i in nombres}
     agarres = []
     en_corte = 0
+    a_mano = 0
     fotos = list(fotos)
+    from . import agarres_descartados
+    descartes = agarres_descartados.leer(cam)
     for e in eventos:
         i = e.get('area')
         if i is None:
@@ -409,6 +412,9 @@ def _datos_anaqueles(cam: str, fechas, a: float, b: float, caps,
         elif e.get('tipo') == 'agarre':
             if _confirmado_en_corte(e['t'], i, fotos):
                 en_corte += 1
+                continue
+            if agarres_descartados.descartado(e['t'], i, descartes)[0]:
+                a_mano += 1
                 continue
             por_area[i][1] += 1
             genero = _genero_de_pid(e.get('pid'), caps)
@@ -427,6 +433,7 @@ def _datos_anaqueles(cam: str, fechas, a: float, b: float, caps,
         por_area = {i: list(totales[i]) for i in nombres}      # sin horas: totales del día
     return {'nombres': nombres, 'productos': productos, 'por_area': por_area,
             'agarres': agarres, 'completos': completos, 'en_corte': en_corte,
+            'a_mano': a_mano,
             'ultimo_registro': registros[-1]}
 
 
@@ -448,6 +455,28 @@ def _separadores(img) -> List[int]:
     return [int(g.mean()) for g in grupos if 4 <= len(g) <= 14 and 20 < g.mean() < w - 20]
 
 
+def _limites_paneles(img) -> Optional[Tuple[int, int]]:
+    """(fin del ANTES, fin del AHORA) de la foto de una alerta.
+
+    ANTES y AHORA son el MISMO recuadro ampliado al mismo alto
+    (`anaqueles_stock.componer_evidencia`): miden lo mismo, así que el fin del
+    AHORA cae al doble que el del ANTES (o en el borde, si no hay persona).
+    Se busca ese par entre las franjas oscuras. 15-oct-2026: en los botes
+    oscuros de Nescafé los huecos entre botes también parecían franjas
+    (10:41:07: 79, 153, 228, 334, 645, 669) y se cortaba en la segunda, 153:
+    el PDF enseñaba solo un trozo del ANTES. El par bueno era 334 y 669."""
+    w = img.shape[1]
+    cortes = _separadores(img)
+    mejor = None
+    for c1 in cortes:
+        for c2 in cortes + [w]:
+            error = abs(c2 - 2 * c1)
+            if c2 > c1 and error <= 4 and (
+                    mejor is None or (error, -c1) < (mejor[0], -mejor[1])):
+                mejor = (error, c1, c2)
+    return (mejor[1], mejor[2]) if mejor else None
+
+
 def _antes_ahora(ruta: Path) -> Optional[bytes]:
     """Recorta la foto de la alerta a «ANTES | AHORA» (sin el panel del
     cliente)."""
@@ -455,9 +484,9 @@ def _antes_ahora(ruta: Path) -> Optional[bytes]:
     img = cv2.imread(str(ruta))
     if img is None:
         return None
-    cortes = _separadores(img)
-    if len(cortes) >= 2:
-        img = img[:, :cortes[1]]
+    limites = _limites_paneles(img)
+    if limites:
+        img = img[:, :limites[1]]
     ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 88])
     return buf.tobytes() if ok else None
 
@@ -481,7 +510,8 @@ def _medida_en_corte(ruta: Path) -> bool:
     if img is None:
         return False
     h, w = img.shape[:2]
-    bordes = [0] + _separadores(img) + [w]
+    limites = _limites_paneles(img)
+    bordes = [0, *limites] if limites else [0] + _separadores(img) + [w]
     for x0, x1 in list(zip(bordes[:-1], bordes[1:]))[:2]:          # ANTES y AHORA
         panel = img[32:max(33, h - 34), x0 + 6:max(x0 + 7, x1 - 6)]
         gris = cv2.cvtColor(panel, cv2.COLOR_BGR2GRAY)
@@ -824,6 +854,12 @@ def _sec_anaqueles(d) -> str:
             '1 agarre no se cuenta: lo confirmó una medida de stock tomada' if n == 1 else
             f'{n} agarres no se cuentan: los confirmaron medidas de stock tomadas')
             + ' mientras la cámara no daba vídeo (imagen gris de iVMS).</div>')
+    n = an.get('a_mano') or 0
+    if n:
+        notas += ('<div class="caja">' + (
+            '1 agarre no se cuenta: se revisó en imagen y era falso' if n == 1 else
+            f'{n} agarres no se cuentan: se revisaron en imagen y eran falsos')
+            + ' (empleado recolocando o reponiendo, producto tapado o imagen borrosa).</div>')
     for s in alertas[:2]:
         tipo = 'posible agotado' if s['tipo'] == 'agotado' else 'cerca de vaciarse'
         notas += (f'<div class="caja"><b>Aviso de «{tipo}»:</b> {_e(s["producto"])} a las '

@@ -193,6 +193,25 @@ def test_la_foto_del_stock_queda_en_antes_y_ahora(tmp_path):
     assert recorte.shape[1] < completa.shape[1]
 
 
+def test_los_huecos_oscuros_entre_botes_no_cortan_el_antes(tmp_path):
+    """15-oct-2026: en los botes de Nescafé los huecos oscuros entre botes
+    parecían las franjas que separan los paneles y el PDF cortaba dentro del
+    ANTES. ANTES y AHORA miden lo mismo: el corte bueno es el que tiene su
+    pareja al doble."""
+    balda = np.full((60, 80, 3), 150, np.uint8)
+    for x in (18, 38, 58):
+        balda[:, x:x + 3] = 30                             # hueco del color del marco
+    persona = np.zeros((120, 50, 3), np.uint8)
+    persona[..., 2] = 255
+    ruta = tmp_path / 'botes.jpg'
+    cv2.imwrite(str(ruta), st.componer_evidencia(balda, balda.copy(), persona, 'Nescafe Gold'))
+    completa = cv2.imread(str(ruta))
+    assert len(ip._separadores(completa)) > 2              # los huecos sí engañan
+    recorte = cv2.imdecode(np.frombuffer(ip._antes_ahora(ruta), np.uint8), cv2.IMREAD_COLOR)
+    panel = (80 * 240 // 60) + 8                           # ancho de ANTES (y de AHORA)
+    assert abs(recorte.shape[1] - 2 * panel) <= 4
+
+
 # ── Medidas de stock tomadas durante un corte de iVMS ───────────────────
 def _gris_ivms():
     """Un recorte de la imagen gris de un corte (gris 78 con ruido de JPEG)."""
