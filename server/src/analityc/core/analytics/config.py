@@ -412,6 +412,11 @@ class AnalyticsConfig:
     # Sin uniones de ida y vuelta (A->B y luego B->A) (26-oct-2026,
     # `costura_sombra._sin_rebote`). ELDE_COSTURA_SIN_REBOTE=0 la apaga.
     COSTURA_SIN_REBOTE: bool = True
+    # Revisar el género tras un CRUCE de cajas, EN SOMBRA (22-oct-2026,
+    # `revision_cruces.py`): solo apunta si cambiaría la etiqueta. Idea del
+    # usuario tras ver un «Mujer» pegado a un hombre. ELDE_REVISION_CRUCES=0
+    # la apaga.
+    REVISION_CRUCES_SOMBRA: bool = True
 
     # ── Suavizado demografico POR PERSONA (persistent_id) — Hito 6 ──
     # Cada lectura demografica comiteada (ya suavizada por track) se acumula

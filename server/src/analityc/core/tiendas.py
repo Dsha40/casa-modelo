@@ -34,6 +34,7 @@ from . import clasificador_uniforme
 from . import personal_descuento
 from . import personal_mapa
 from . import costura_sombra
+from . import revision_cruces
 from . import calor_diferido
 # ── Modulos de analitica de personas (deteccion + genero/edad) ──
 from .analytics.config import AnalyticsConfig
@@ -2540,6 +2541,12 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 for _tid_d in _deshechos:
                     # Unión deshecha (era otra persona): que abra su ficha.
                     getattr(self, '_captured_ids', set()).discard(_tid_d)
+                # Revisar el género de quien se cruzó con otro, EN SOMBRA
+                # (22-oct-2026, `revision_cruces.py`): solo apunta.
+                revision_cruces.observar(
+                    camera_id, inference_image, self.active_tracks,
+                    getattr(self, '_demographics', None),
+                    getattr(self, '_capture_meta', None), self.frame_counter)
                 # Reparto del calor diferido (22-oct-2026): ya se sabe quién
                 # es personal (uniforme, costura) en esta imagen.
                 if (AnalyticsConfig.HEATMAP_ENABLED
