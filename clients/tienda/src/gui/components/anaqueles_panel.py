@@ -53,6 +53,15 @@ CADUCIDAD_CAMARA_S = 20.0
 #: Sucesos que se conservan en el feed.
 MAX_EVENTOS = 40
 
+#: Ranking y feed se reconstruyen solo si cambia lo que enseñan, y como mucho
+#: cada esto (28-oct-2026). Antes se rehacían con CADA respuesta del servidor
+#: (~13 por segundo con el vídeo), casi siempre iguales: con 4 áreas y 40
+#: sucesos, 22 ms por respuesta y otros 60-85 ms de lo que Qt hace después
+#: (borrar los widgets viejos, dar estilo y maquetar los nuevos), medido en el
+#: PC de la tienda. La telemetría del ciclo solo veía los 22. Las cifras, los
+#: avisos y el stock se siguen escribiendo con cada respuesta: son baratos.
+RECONSTRUIR_CADA_S = 0.5
+
 _GENERO_LEGIBLE = {'male': 'Hombre', 'female': 'Mujer',
                    'Male': 'Hombre', 'Female': 'Mujer'}
 
@@ -145,7 +154,7 @@ class AnaquelesPanel(QWidget):
         self.lbl_personal.hide()
         raiz.addWidget(self.lbl_personal)
 
-        # Ranking (se reconstruye entero en cada refresco: son pocas filas).
+        # Ranking (se reconstruye entero cuando cambia: son pocas filas).
         self._zona_ranking = QVBoxLayout()
         self._zona_ranking.setSpacing(4)
         cont_ranking = QWidget()
@@ -174,6 +183,16 @@ class AnaquelesPanel(QWidget):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(contenedor)
         raiz.addWidget(scroll, stretch=1)
+
+        # Lo último que se pintó en ranking y feed (ver RECONSTRUIR_CADA_S).
+        # Si cambian antes del plazo, se pintan una vez al cumplirse.
+        self._firma_ranking: Optional[tuple] = None
+        self._version_feed = 0
+        self._feed_pintado = -1
+        self._listas_ts = -1e9
+        self._timer_listas = QTimer(self)
+        self._timer_listas.setSingleShot(True)
+        self._timer_listas.timeout.connect(self._repintar)
 
         # Refresco periódico: expira cámaras calladas aunque no llegue nada.
         self._timer = QTimer(self)
@@ -233,6 +252,7 @@ class AnaquelesPanel(QWidget):
                     continue
                 self._vistos[clave] = None
                 self._eventos.insert(0, dict(ev, camara=estado['nombre']))
+                self._version_feed += 1
             del self._eventos[MAX_EVENTOS:]
             if len(self._vistos) > 400:
                 for k in list(self._vistos)[:-200]:
@@ -308,8 +328,30 @@ class AnaquelesPanel(QWidget):
         else:
             self.lbl_personal.hide()
 
-        self._pintar_ranking(areas_todas, varias=len(vivas) > 1)
-        self._pintar_feed()
+        self._reconstruir_listas(areas_todas, varias=len(vivas) > 1)
+
+    def _reconstruir_listas(self, areas: List[Dict[str, Any]],
+                            varias: bool) -> None:
+        """Ranking y feed, solo si cambió lo que enseñan y como mucho cada
+        `RECONSTRUIR_CADA_S`. Un cambio que llega antes del plazo se pinta
+        al cumplirse, con lo último que haya: no se pierde ninguno."""
+        firma = _firma_ranking(areas, varias)
+        cambia_ranking = firma != self._firma_ranking
+        cambia_feed = self._version_feed != self._feed_pintado
+        if not (cambia_ranking or cambia_feed):
+            return
+        espera = RECONSTRUIR_CADA_S - (time.monotonic() - self._listas_ts)
+        if espera > 0:
+            if not self._timer_listas.isActive():
+                self._timer_listas.start(int(espera * 1000) + 1)
+            return
+        self._listas_ts = time.monotonic()
+        if cambia_ranking:
+            self._firma_ranking = firma
+            self._pintar_ranking(areas, varias)
+        if cambia_feed:
+            self._feed_pintado = self._version_feed
+            self._pintar_feed()
 
     def _refrescar_stock(self, vivas=None) -> None:
         lineas = lineas_de_stock(self._vivas() if vivas is None else vivas)
@@ -416,6 +458,14 @@ class AnaquelesPanel(QWidget):
                 f"{cuerpo}")
             lbl.setStyleSheet('font-size:10px;')
             self._zona_feed.addWidget(lbl)
+
+
+def _firma_ranking(areas: List[Dict[str, Any]], varias: bool) -> tuple:
+    """Todo lo que enseña el ranking: si no cambia, no se reconstruye."""
+    return (varias, tuple(
+        (a.get('camara'), a.get('nombre'), a.get('idx'),
+         int(a.get('agarres') or 0), int(a.get('visitas') or 0),
+         int(a.get('personas_ahora') or 0)) for a in areas))
 
 
 def duracion(segundos: Any) -> str:

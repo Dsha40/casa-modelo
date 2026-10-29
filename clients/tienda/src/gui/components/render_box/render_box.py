@@ -61,6 +61,7 @@ from elde_core.ui.render_box_puerta import PuertaDireccionalMixin
 from elde_core.ui import overlay_munecas as _munecas
 from elde_core.ui import etiqueta_seguimiento as _etiqueta_id
 from elde_core.ui import telemetria_ciclo as _telemetria
+from elde_core.ui import jpeg_a_medida as _jpeg_a_medida
 from elde_core.ui.selector_local_camara import (
     SelectorLocalCamara, SIN_LOCAL_USA_EL_PIE)
 _DVR_MIME = "application/x-dvr-channel"
@@ -1815,11 +1816,23 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             detections = _etiqueta_id.con_id(detections)
         if self._try_supervision_overlay(detections, jpeg):
             return
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(jpeg, "JPEG"):
+        # 28-oct-2026: se abre ya al tamaño del recuadro (`jpeg_a_medida`,
+        # ~9 ms menos por imagen) y el pintor se escala, asi que todo se
+        # sigue dibujando en pixeles de la imagen ENVIADA, como antes.
+        etiqueta = self.imagen_label.size()
+        imagen, ancho_real, alto_real = _jpeg_a_medida.abrir(
+            jpeg, etiqueta.width(), etiqueta.height())
+        if imagen is None:
             return
+        pixmap = QPixmap.fromImage(imagen)
         try:
             painter = QPainter(pixmap)
+            if pixmap.width() != ancho_real or pixmap.height() != alto_real:
+                # Sin suavizado, las rayas de 2 px reducidas saldrian
+                # dentadas; antes las suavizaba el encogido final.
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.scale(pixmap.width() / ancho_real,
+                              pixmap.height() / alto_real)
             font = QFont(); font.setPointSize(10); font.setBold(True)
             painter.setFont(font)
             fm = painter.fontMetrics()
@@ -1844,8 +1857,10 @@ class Render_box(CapturaDVRMixin, PuertaDireccionalMixin, QFrame):
             painter.end()
         except Exception as e:
             print(f"draw detections error: {e}")
-        self.image_w = pixmap.width()
-        self.image_h = pixmap.height()
+        # Los de la imagen enviada, no los del pixmap reducido: con ellos
+        # pasan las zonas y la regla de 0-1000 a pixeles.
+        self.image_w = ancho_real
+        self.image_h = alto_real
         if hasattr(self, 'text_size'):
             self.text_size.setText(f"{self.image_w}x{self.image_h}")
         self._apply_label_pixmap(pixmap)
