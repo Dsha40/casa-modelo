@@ -1,5 +1,28 @@
 """src/analityc/core/detector_grafo.py — el detector RF-DETR con un grafo de CUDA.
 
+## NO ENCENDER TODAVÍA: desactiva los grafos de MiVOLO y ViTPose (29-oct-2026)
+
+En la pasada con grafo de la A/B de abajo, los grafos de MiVOLO (16:34:04)
+y de ViTPose (16:34:24) se desactivaron solos con «Inplace update to
+inference tensor outside InferenceMode is not allowed». En los 18 arranques
+sin este grafo (26 a 29-oct) no pasó nunca. Todo siguió funcionando, pero
+MiVOLO y ViTPose por el camino lento.
+
+Por qué: rfdetr llama al modelo dentro de `@torch.inference_mode()`
+(`predict`, rfdetr/detr.py), así que este grafo es el PRIMERO del proceso y
+se graba en modo inferencia. Al empezar a grabar un grafo, torch actualiza un
+estado interno que crea con el primero; nacido en modo inferencia, ya no se
+puede actualizar fuera de él, que es donde graban MiVOLO y ViTPose: falla
+`capture_begin` y `GrafosPorLote` apaga su grafo. Reproducido con dos modelos
+de juguete y el mismo `GrafosPorLote`: solo falla si el primer grafo se grabó
+en modo inferencia. Que ese estado sea el del generador de números aleatorios
+de la GPU es deducción: lo sugiere el segundo error que queda tras el fallo
+(«Offset increment outside graph capture»); el código de torch es compilado.
+
+Arreglo probado solo con los modelos de juguete: grabar siempre con
+`torch.inference_mode(False)` en `GrafosPorLote._grabar`. Antes de encender
+esto hay que hacerlo y repetir la A/B: la de abajo no vale para decidir.
+
 ## Por qué (29-oct-2026)
 
 El detector es la etapa más cara del servidor (~35 ms por imagen en el PC
@@ -25,9 +48,10 @@ cada pasada, cronómetro por etapas): el detector pasa de 34,8 a 30,0 ms de
 media por imagen, y baja en cada grupo (0 personas 35,0 → 30,0; 1 persona
 33,8 → 29,8; 2 personas 36,5 → 31,3). El procesador del detector solo baja
 1,6 ms (28,5 → 26,9): se ahorra espera, no CPU. Las imágenes por segundo no
-cambiaron de forma visible (13,4 frente a 13,1), pero la pasada con grafo
-tuvo mucha más gente. Sin aumento visible de memoria de la GPU; grabar el
-grafo al arrancar, ~3 s. Sin probar: iVMS en vivo y varias cámaras.
+cambiaron de forma visible (13,4 frente a 13,1): en la pasada con grafo,
+MiVOLO y ViTPose fueron SIN sus grafos (ver arriba), y además hubo más
+gente. Sin aumento visible de memoria de la GPU; grabar el grafo al
+arrancar, ~3 s. Sin probar: iVMS en vivo y varias cámaras.
 
 ## Cómo
 
@@ -40,8 +64,9 @@ puede repetir desde dos hilos a la vez.
 
 ## Interruptor
 
-APAGADO por defecto hasta la A/B en vivo: `ELDE_GRAFO_DETECTOR=1` lo
-enciende. `ELDE_GRAFOS_CUDA=0` apaga todos los grafos, este incluido.
+APAGADO por defecto, y no encender hasta el arreglo de arriba:
+`ELDE_GRAFO_DETECTOR=1` lo enciende. `ELDE_GRAFOS_CUDA=0` apaga todos los
+grafos, este incluido.
 """
 from __future__ import annotations
 
