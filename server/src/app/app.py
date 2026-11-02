@@ -21,6 +21,7 @@ from starlette.websockets import WebSocketState
 from . import baliza_descubrimiento as _baliza
 from . import captura_contrato as _captura
 from . import fallo_imagen_IA_pipeline as _fallo
+from . import grabador_personas as _grabador_personas
 from . import registro_dispositivos as _registro
 from . import validacion_contrato as _validacion
 from . import whatsapp_alertas as _whatsapp
@@ -242,6 +243,11 @@ app.include_router(api_tienda_router)
 # respuesta que la página pide cada 3 s (`api_en_vivo.py`).
 from .api_en_vivo import router as api_en_vivo_router  # noqa: E402
 app.include_router(api_en_vivo_router)
+
+# Parar y reanudar el grabador de personas sin reiniciar (2-nov-2026,
+# `api_grabador_personas.py`).
+from .api_grabador_personas import router as api_grabador_personas_router  # noqa: E402
+app.include_router(api_grabador_personas_router)
 
 # Busqueda VLM de los dashboards de producto ("buscame el carro rojo").
 # Son ACCIONES (encender el buscador, lanzar una busqueda), asi que viven en
@@ -1125,6 +1131,11 @@ def _full_frame_sync(
     imagen; devuelve solo las detecciones en metadata y el cliente las pinta
     sobre su propio frame (mucha menos latencia/ancho de banda).
     """
+    # Lo que mandó el cliente con la imagen, para el grabador de tramos con
+    # gente (30-oct-2026, `grabador_personas.py`). Solo los argumentos: va
+    # ANTES de crear ninguna variable local.
+    _parametros = {k: v for k, v in locals().items()
+                   if k not in ('processor', 'image_data')}
     t0 = time.time()
     img = _decode_image(image_data)
     processed_img, metadata = process_image_sync(
@@ -1172,6 +1183,8 @@ def _full_frame_sync(
     fallo = _fallo.respuesta_si_fallo(metadata, camera_id, processing_time)
     if fallo is not None:
         return fallo
+    # Sin `ELDE_GRABAR_PERSONAS` no hace nada (30-oct-2026).
+    _grabador_personas.ver(camera_id, image_data, metadata, _parametros)
 
 
     # MODO DIRECTO: no se codifica ni envia la imagen (el cliente la dibuja).
