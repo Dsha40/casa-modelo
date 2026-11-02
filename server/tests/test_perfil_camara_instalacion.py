@@ -151,9 +151,14 @@ def test_los_perfiles_del_repo_los_carga_su_camara_real():
     Es la prueba de que la calibracion de agosto vuelve a aplicarse a los
     `device_id` que manda el cliente HOY, con sufijo de instalacion.
     """
+    # El de c2 (stand de degustación) se quitó el 2-nov-2026: en la casa
+    # modelo c2 es de solo permanencia y no lleva calibración (abajo).
+    c2 = PERFILES / 'win-iVMS-4200-c2.json'
+    if c2.is_file():
+        assert demo._load_camera_profile(
+            'win-iVMS-4200-c2-i58bf7b').SOLO_PERMANENCIA is True
     for archivo, camera_id in (
-            ('win-iVMS-4200.json', 'win-iVMS-4200-i58bf7b'),
-            ('win-iVMS-4200-c2.json', 'win-iVMS-4200-c2-i58bf7b')):
+            ('win-iVMS-4200.json', 'win-iVMS-4200-i58bf7b'),):
         if not (PERFILES / archivo).is_file():
             pytest.skip(f'{archivo} no esta en este arbol')
         vista = demo._load_camera_profile(camera_id)

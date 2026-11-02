@@ -1,37 +1,7 @@
 {
-  "_descripcion": "Captura de la ventana iVMS-4200 (Camera 04) - stand de degustacion de charcuteria. Camara alta con lente ojo de pez muy marcado, escena amplia: la persona util (visitante frente a la vitrina o en el pasillo ajedrezado) aparece con bbox de 60-140 px de alto, muy por debajo del minimo global.",
-  "_regla": "Solo se relajan filtros de CAPTACION de rostro (pose/calidad/tamano). Los umbrales de PRECISION del genero/edad (confianza, margen, brackets, ensemble, agree ratio) NO se tocan: los mantiene la config global en modo precision maxima.",
+  "_descripcion": "Casa modelo, cámara 2 (iVMS-4200). 2-nov-2026: solo permanencia y mapa de calor, a petición del usuario. La cámara de visitas es la recámara principal (c4).",
+  "_historia": "Hasta el 2-nov-2026 este perfil era el del stand de degustación del supermercado (detector a 0,18, cajas de 40x90, caras pequeñas…). Se quitó entero: era de otra cámara. Está en el historial de git.",
 
-  "_nota_bbox": "Medido en el log del 7-ago-2026: la practica totalidad de las personas de esta camara llegaba como 'Persona muy lejana' con el minimo global 60x140 (bboxes reales 60-136 de alto). Con eso la demografia del stand salia 'sin_muestras' para todos.",
-  "DEMO_MIN_PERSON_BBOX_W": 40,
-  "DEMO_MIN_PERSON_BBOX_H": 90,
-
-  "_nota_deteccion": "8-ago-2026: esta ventana tambien muestra camaras exteriores en picado fuerte (GENERATOR y similares) donde la persona sale pequena, parcial u ocluida por estructuras, y a 0.25 el detector la pierde. Piso de confianza y activacion del tracker mas bajos SOLO para esta camara; el resto del sistema conserva 0.25. Si aparecieran falsos positivos (sombras, la manguera), subir de vuelta a 0.20/0.22.",
-  "PERSON_DETECT_CONF": 0.18,
-  "BYTETRACK_TRACK_ACTIVATION_THRESH": 0.18,
-
-  "_nota_pitch": "Montaje alto sobre el stand: el picado de las caras cercanas supera los 48 grados globales.",
-  "DEMO_POSE_MAX_PITCH_DEG": 52.0,
-
-  "_nota_contraste": "Iluminacion blanca de supermercado y reflejos de la vitrina lavan el contraste facial.",
-  "DEMO_MIN_CONTRAST": 12.0,
-
-  "_nota_blur": "La varianza del Laplaciano cae junto con el contraste aunque la cara este nitida. 16 sigue descartando motion blur real.",
-  "DEMO_MIN_BLUR_VAR": 16.0,
-
-  "_nota_yunet_score": "Caras chicas y lavadas puntuan mas bajo en YuNet.",
-  "DEMO_YUNET_MIN_SCORE": 0.65,
-
-  "_nota_upscale": "Caras pequenas a media distancia: mas resolucion de entrada a YuNet (corre en GPU, costo asumible).",
-  "DEMO_YUNET_UPSCALE_TARGET": 640,
-
-  "_nota_aspecto": "La distorsion de barril del ojo de pez estira las caras fuera del centro del encuadre.",
-  "DEMO_FACE_ASPECT_MIN": 0.80,
-  "DEMO_FACE_ASPECT_MAX": 1.55,
-
-  "_nota_ojos": "El gran angular comprime la distancia interocular aparente en caras no centradas.",
-  "DEMO_MIN_EYE_FACE_RATIO": 0.20,
-
-  "_nota_asimetria": "Luces de techo en franjas + reflejos de la vitrina producen sombras laterales fuertes.",
-  "DEMO_MAX_ASYMMETRY": 150.0
+  "_nota_solo_permanencia": "Solo detecta y sigue: sin clasificar, sin identidades, sin fichas, avisos ni visitas. Apunta cuánto se queda la gente (permanencia_cuarto.py) y su mapa de calor.",
+  "SOLO_PERMANENCIA": true
 }

@@ -35,6 +35,10 @@ from . import personal_descuento
 from . import personal_mapa
 from . import genero_v2
 from . import costura_sombra
+from . import identidad_cuerpo
+from . import calentar_modelos
+from . import permanencia_cuarto
+from . import origen_identidad
 from . import revision_cruces
 from . import presupuesto_imagen
 from . import calor_diferido
@@ -388,6 +392,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 # persona y no toca disco). Ver REID_RESET_POLICY en config.
                 _politica = AnalyticsConfig.REID_RESET_POLICY
                 _con_ttl = _politica == "ttl"
+                # 30-oct-2026: con TTL de 24 h la galería también va a disco
+                # (REID_PERSISTIR_CON_TTL), o un reinicio olvidaría a todos.
+                _persistir = (not _con_ttl or bool(getattr(
+                    AnalyticsConfig, 'REID_PERSISTIR_CON_TTL', False)))
                 self._reidentifier = FaceReidentifier(
                     embedding_session=getattr(self, '_face_embedding_session',
                                               None),
@@ -397,12 +405,17 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     reset_policy=_politica,
                     ttl_seconds=(AnalyticsConfig.REID_TTL_S if _con_ttl
                                  else 0.0),
-                    persistir=not _con_ttl,
+                    persistir=_persistir,
                 )
                 if _con_ttl:
+                    # Sin `atexit` también con disco: ver el comentario de
+                    # abajo. Se pierde, como mucho, REID_GUARDAR_CADA_S.
                     logger.info(
-                        "Re-identificador con TTL de %.0f min (galeria en RAM)",
-                        AnalyticsConfig.REID_TTL_S / 60.0)
+                        "Re-identificador con TTL de %.0f min (%s)",
+                        AnalyticsConfig.REID_TTL_S / 60.0,
+                        'galeria en disco: %d personas cargadas' % len(
+                            self._reidentifier._db) if _persistir
+                        else 'galeria en RAM')
                 else:
                     # Guardar la DB al cerrar el proceso (Ctrl+C / shutdown).
                     # Solo con galeria persistente: `atexit` guarda una
@@ -447,6 +460,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 reidentifier=self._reidentifier,
                 par_session=getattr(self, '_par_session', None),
             )
+            # La primera llamada a cada sesión ONNX tardaba ~30 s y la pagaba
+            # la PRIMERA persona tras arrancar (30-oct-2026): se paga ya, en
+            # un hilo, cuando aún no hay nadie (`calentar_modelos.py`).
+            calentar_modelos.calentar(self)
             self._people_counter = PeopleCounter()
             self._analytics_logger = AnalyticsLogger()
             # Mapa de calor: se toma del registro GLOBAL al conocer el
@@ -514,6 +531,33 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         menos tiempo. Los fps salen del ByteTrack de la camara en curso."""
         return ritmo_imagenes.imagenes_ref(
             imagenes, ritmo_imagenes.fps_de(getattr(self, '_byte_tracker', None)))
+
+    def _dentro_del_roi(self, track: dict) -> bool:
+        """¿Está o ha estado dentro del ROI este seguimiento? Sin ROI activo,
+        sí: todo cuenta, como antes (`origen_identidad.py`, 30-oct-2026)."""
+        return (not getattr(self, '_roi_activo', False)
+                or bool(track.get('has_been_inside') or track.get('is_inside')))
+
+    @staticmethod
+    def _cara_recien_creada(reid: Any, uid: Any, segundos: float = 10.0) -> bool:
+        """La identidad de cara `uid` se acaba de crear (no viene del disco
+        ni de antes): su `first_seen` es de hace menos de `segundos`."""
+        try:
+            rec = reid._db.get(uid) or {}
+            return time.time() - float(rec.get('first_seen', 0.0)) < segundos
+        except Exception:                                   # noqa: BLE001
+            return False
+
+    def _cada(self, imagenes: int, en_imagenes: str) -> int:
+        """Cadencia de un trabajo de identidad o clasificación (30-oct-2026).
+
+        Con la opción `en_imagenes` de AnalyticsConfig a True cuenta
+        imágenes REALES: a más fps, más intentos, que es usar el tiempo que
+        dejaron libre los anaqueles y la pose. Si no, en tiempo real como
+        el resto de ajustes (`_imagenes`)."""
+        if getattr(AnalyticsConfig, en_imagenes, False):
+            return max(1, int(imagenes))
+        return self._imagenes(imagenes)
 
     def _make_byte_tracker(self, camera_id: Any = None):
         """Crea un sv.ByteTrack nuevo con los parametros de AnalyticsConfig.
@@ -763,6 +807,9 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         # El PERSONAL no se clasifica (19-oct-2026, lo pidió el usuario): no
         # es un cliente y así se ahorran caras y MiVOLO.
         if personal_descuento.no_clasificar(self, track_id):
+            return 'Personas'
+        # Cámara de solo permanencia (30-oct-2026): nadie se clasifica.
+        if getattr(self, '_solo_permanencia', False):
             return 'Personas'
         if track_id is not None and hasattr(self, '_demographics'):
             result = self._demographics.classify(frame, bbox, track_id)
@@ -1284,6 +1331,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         roi_polygon_points = self.roi_polygon.reshape((-1, 1, 2))
         counted_in_frame = []
         tracks_to_remove = []
+        _quitar_fuera = bool(getattr(AnalyticsConfig, 'ROI_FILTRA_DETECCIONES',
+                                     False))
 
         self.person_count_inside = 0
         self.active_by_category = {'Hombres': 0, 'Mujeres': 0, 'Niños': 0, 'Personas': 0}
@@ -1390,18 +1439,26 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     if not self.is_near_recent_counted(current_pos):
                         counted_in_frame.append(track_id)
                 
+                # Borrar a quien sale del ROI solo si el ROI también filtra
+                # las detecciones (ROI_FILTRA_DETECCIONES, 30-oct-2026): con
+                # exit_frames_threshold = 1, quien estuvo dentro se borraba
+                # en cuanto pisaba fuera, se recreaba a la imagen siguiente
+                # sin identidad del cuerpo ni «estuvo dentro», y volvía a
+                # borrarse. Sin filtro, solo muere quien deja de verse.
+                if not _quitar_fuera:
+                    continue
                 if track.get('has_been_inside', False) and track['frames_out_roi'] >= self._imagenes(self.exit_frames_threshold):
                     tracks_to_remove.append(track_id)
 
                 elif not track.get('has_been_inside', False) and track['frames_out_roi'] > self._imagenes(self.max_frames_out):
                     tracks_to_remove.append(track_id)
-        
+
         for track_id in tracks_to_remove:
             self._remove_track(track_id)
-        
+
         for track_id in counted_in_frame:
             if self._count_staff_safe(track_id):
-                if track_id in self.active_tracks:
+                if track_id in self.active_tracks and _quitar_fuera:
                     self._remove_track(track_id)
         
         return self.person_count_inside
@@ -1630,7 +1687,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     or AnalyticsConfig.DEMO_HYSTERESIS_ENABLED
                 )
                 if (_needs_classify
-                        and (self.frame_counter + track_id) % self._imagenes(self._classify_every_n) == 0
+                        and (self.frame_counter + track_id) % self._cada(
+                            self._classify_every_n, 'DEMO_CADENCIA_EN_IMAGENES') == 0
                         and hasattr(self, 'last_processed_frame')
                         and self.last_processed_frame is not None):
                     new_cat = self._classify_person(self.last_processed_frame, det['box'], track_id)
@@ -1776,7 +1834,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     _cur_cat in ('Personas', 'Desconocido')
                     or AnalyticsConfig.DEMO_HYSTERESIS_ENABLED
                 )
-                _turno = (self.frame_counter + tid) % self._imagenes(self._classify_every_n) == 0
+                _turno = (self.frame_counter + tid) % self._cada(
+                    self._classify_every_n, 'DEMO_CADENCIA_EN_IMAGENES') == 0
                 if _cur_cat in ('Personas', 'Desconocido'):
                     # Solo quien aún no tiene género pasa por el presupuesto
                     # (`presupuesto_imagen.py`; apagado = el turno de siempre).
@@ -1893,8 +1952,10 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         body = getattr(self, '_body_reidentifier', None)
         body_ok = (body is not None and body.is_available
                    and frame is not None and getattr(frame, 'size', 0) > 0)
-        # Cadencia y antiguedad en tiempo real, no en imagenes (`_imagenes`).
-        _every = max(1, self._imagenes(int(AnalyticsConfig.BODY_REID_EVERY_N)))
+        # Antiguedad en tiempo real (`_imagenes`); la cadencia, en imagenes
+        # reales desde el 30-oct-2026 (`_cada`, BODY_REID_CADENCIA_EN_IMAGENES).
+        _every = self._cada(int(AnalyticsConfig.BODY_REID_EVERY_N),
+                            'BODY_REID_CADENCIA_EN_IMAGENES')
         _min_h = int(AnalyticsConfig.BODY_REID_MIN_CROP_H)
         _min_seen = self._imagenes(int(AnalyticsConfig.BODY_REID_MIN_SEEN_FRAMES))
         _links = 0
@@ -1908,6 +1969,16 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 track['persistent_confirmed'] = True
                 track['identity_source'] = 'face'
                 reid.anotar_identidad(tid, uid)
+                # Dónde nació (`origen_identidad.py`): la del cuerpo que
+                # tenía, si tenía; si la cara es nueva, aquí y ahora.
+                origen_identidad.heredar(track.get('_body_match'), uid)
+                if origen_identidad.nacio_dentro(uid) is None and \
+                        self._cara_recien_creada(reid, uid):
+                    origen_identidad.anotar(
+                        uid, self._dentro_del_roi(track), 'cara')
+                # Tenía identidad solo por el cuerpo: pasa a la de la cara
+                # (30-oct-2026, `identidad_cuerpo.py`).
+                identidad_cuerpo.unir_con_cara(body, track, uid)
                 # PERSONAL enrolado: se marca en el track (para que los
                 # modos y el heatmap lo salten) y NO cuenta como visitante.
                 # OJO: si el UNIFORME ya lo marco (racha corporal), el que
@@ -1918,7 +1989,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     track['personal_rol'] = _ficha_per.get('rol')
                 elif not track.get('es_personal'):
                     track['es_personal'] = False
-                    self._confirmed_unique.add(uid)
+                    if origen_identidad.cuenta(uid):
+                        self._confirmed_unique.add(uid)
                 # Enrolar su cuerpo en la galeria corporal (throttled) -> poder
                 # reconocerlo si reaparece de espaldas dentro de la sesion.
                 if _due:
@@ -1943,14 +2015,50 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                         # ¿Viste un uniforme enrolado? Funciona TAMBIEN para
                         # los prov: (de espaldas, sin rostro que confirmar).
                         self._marcar_si_uniforme(track, emb)
-                        m = body.match(emb)
-                        if m is not None:
-                            matched = m[0]
-                            track['_body_match'] = matched  # cache para el track
+                        if track.get('_body_match'):
+                            # Ya reconocido: su huella refresca la galería
+                            # (cuenta como «visto hace poco», 30-oct-2026).
+                            body.enroll(track['_body_match'], emb)
+                        else:
+                            # Umbral según cuándo se le vio por última vez, y
+                            # huellas para crear su identidad si no tiene
+                            # (`identidad_cuerpo.py`, 30-oct-2026).
+                            # Una persona no puede estar dos veces en la
+                            # imagen: fuera las identidades de los demás.
+                            _info_c: dict = {}
+                            pid_c, sim_c = identidad_cuerpo.buscar(
+                                body, emb, ocupadas={
+                                    str(t2.get('persistent_id'))
+                                    for t2_id, t2 in self.active_tracks.items()
+                                    if t2_id != tid and t2.get('persistent_id')},
+                                info=_info_c)
+                            # Se parece a alguien que ya está en la imagen
+                            # con otro número (persona partida en dos): se
+                            # ESPERA en vez de crearle otra identidad.
+                            track['_espera_ocupada'] = bool(
+                                pid_c is None and _info_c.get('ocupada'))
+                            if pid_c is not None:
+                                matched = pid_c
+                                track['_body_match'] = matched  # cache
+                            else:
+                                identidad_cuerpo.guardar_huella(track, emb)
+                            identidad_cuerpo.anotar_busqueda(
+                                sim_c, pid_c is not None)
             # Reusar el ultimo match corporal del track (el cuerpo no cambia
             # mientras el track vive) -> no recomputa cada frame.
             if matched is None:
                 matched = track.get('_body_match')
+            # Sin cara ni parecido con nadie: el cuerpo crea su identidad
+            # (30-oct-2026). Lo heredado por la costura manda.
+            if (matched is None and body_ok and not track.get('_heredado')
+                    and not track.get('_espera_ocupada')):
+                matched = identidad_cuerpo.quizas_crear(body, track)
+                if matched:
+                    track['_body_match'] = matched
+                    # Solo las nacidas dentro del ROI cuentan como visita
+                    # (`origen_identidad.py`).
+                    origen_identidad.anotar(
+                        matched, self._dentro_del_roi(track), 'cuerpo')
             if matched:
                 track['persistent_id'] = matched
                 track['persistent_confirmed'] = True
@@ -1963,7 +2071,8 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                     track['personal_rol'] = _ficha_per.get('rol')
                 elif not track.get('es_personal'):
                     track['es_personal'] = False
-                    self._confirmed_unique.add(matched)
+                    if origen_identidad.cuenta(matched):
+                        self._confirmed_unique.add(matched)
                 _links += 1
             elif track.get('_heredado'):
                 # Unido a un seguimiento anterior por `costura_sombra.py`
@@ -2175,6 +2284,11 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
         # En tiempo real (`_imagenes`, 5-oct-2026): a 10 fps, 3 imagenes eran
         # 0,3 s y quien estaba parado en el borde entraba y salia varias veces.
         hyst = max(1, self._imagenes(int(AnalyticsConfig.ZONE_HYSTERESIS_FRAMES)))
+        # Permanencia en TODA la imagen (30-oct-2026). Un modo que mide SU
+        # zona (PermanenciaArea) fija `_zona_toda_la_imagen = False`.
+        _toda_la_imagen = bool(getattr(
+            self, '_zona_toda_la_imagen',
+            getattr(AnalyticsConfig, 'PERMANENCIA_TODA_LA_IMAGEN', False)))
 
         # 1) Observacion por persona desde los tracks activos (DENTRO si
         #    cualquiera de sus tracks tiene el pie en la zona).
@@ -2189,13 +2303,21 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
             pid = track.get('persistent_id')
             if not pid or personal_descuento.es_personal(self, pid):
                 continue
+            # Nació fuera del ROI: es alguien que volvió de un cuarto sin
+            # ser reconocido, no una visita (30-oct-2026,
+            # `origen_identidad.py`).
+            if not origen_identidad.cuenta(pid):
+                continue
             # Los provisionales solo entran cuando NO se exige confirmacion.
             # Con ellos se mide PRESENCIA, no visitantes unicos: una oclusion
             # que parta el track da un pid nuevo (ver el aviso del YAML).
             if require_conf and str(pid).startswith('prov:'):
                 continue
+            # PERMANENCIA_TODA_LA_IMAGEN (30-oct-2026, casa modelo): DENTRO
+            # = se le ve en cualquier parte de la imagen, no solo en el ROI.
+            # El ROI sigue decidiendo QUIÉN es visita (`origen_identidad`).
             observed[pid] = observed.get(pid, False) or bool(
-                track.get('in_zone'))
+                _toda_la_imagen or track.get('in_zone'))
 
         # 2) Personas ya conocidas SIN track activo este frame -> FUERA
         #    (salieron del encuadre; tras histeresis contara salida).
@@ -2336,6 +2458,12 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 # Preparar polígono ROI para filtrado espacial
                 roi_active = activate_roi and hasattr(self, 'roi_polygon') and self.roi_polygon is not None
                 roi_poly = self.roi_polygon.reshape((-1, 1, 2)) if roi_active else None
+                # Para `identidad_cuerpo.quizas_crear` (30-oct-2026).
+                self._roi_activo = bool(roi_active)
+                # Cámara de solo permanencia (30-oct-2026,
+                # `permanencia_cuarto.py`): su perfil lo dice.
+                self._solo_permanencia = bool(getattr(
+                    self._perfil_camara(camera_id), 'SOLO_PERMANENCIA', False))
 
                 detections = []
                 staff_detected = 0
@@ -2432,8 +2560,16 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                             center = self.center_of(box)
                             confidence = confs_p[i] if i < len(confs_p) else 0.5
 
-                            # Filtro ROI
-                            if roi_poly is not None:
+                            # Filtro ROI. Apagado por defecto desde el
+                            # 30-oct-2026 (ROI_FILTRA_DETECCIONES): con él,
+                            # quien salía del ROI dejaba de seguirse y de
+                            # clasificarse, y al volver por dentro de la
+                            # casa era una persona y una visita nuevas. El
+                            # ROI sigue contando entradas y decidiendo qué
+                            # identidades son visitas (`origen_identidad`).
+                            if roi_poly is not None and bool(getattr(
+                                    AnalyticsConfig,
+                                    'ROI_FILTRA_DETECCIONES', False)):
                                 if cv2.pointPolygonTest(roi_poly, (int(center[0]), int(center[1])), False) < 0:
                                     continue
 
@@ -2500,81 +2636,97 @@ class TiendasProcess(ReporteMixin, DibujoMixin, FotosMixin, ModelosMixin,
                 # Actualizar tracks usando IDs de BoTSORT (estables con Kalman)
                 self._update_tracks_botsort(detections)
 
-                # Capturas: foto por persona (tracks ESTABLECIDOS) + dedup Re-ID
-                # + relleno de genero/edad cuando converge la demografia.
-                if AnalyticsConfig.CAPTURE_DETECTIONS:
-                    self._capture_established_tracks(inference_image)
-                    self._update_captures_demographics()
-                    # Género v2 en las fichas ya cerradas (27-oct-2026).
-                    genero_v2.aplicar(self)
+                # Cámara de SOLO PERMANENCIA (30-oct-2026): ni fichas, ni
+                # identidad, ni uniforme, ni visitas, ni costura: solo cuánto
+                # se queda la gente en el cuarto (`permanencia_cuarto.py`).
+                if getattr(self, '_solo_permanencia', False):
+                    permanencia_cuarto.de(camera_id).observar(
+                        self.active_tracks)
+                    # El mapa de calor del cuarto sí: sin repartir, lo
+                    # anotado en `calor_diferido` se acumularía sin fin.
+                    if (AnalyticsConfig.HEATMAP_ENABLED
+                            and getattr(self, '_heatmap', None) is not None):
+                        calor_diferido.de(camera_id).repartir(
+                            self.active_tracks, self._heatmap,
+                            lambda: personal_mapa.mapa(camera_id, getattr(
+                                self, '_camera_display_name', None)),
+                            personal_mapa.es_de_camiseta)
+                else:
+                    # Capturas: foto por persona (tracks ESTABLECIDOS) + dedup Re-ID
+                    # + relleno de genero/edad cuando converge la demografia.
+                    if AnalyticsConfig.CAPTURE_DETECTIONS:
+                        self._capture_established_tracks(inference_image)
+                        self._update_captures_demographics()
+                        # Género v2 en las fichas ya cerradas (27-oct-2026).
+                        genero_v2.aplicar(self)
 
-                # Resolucion de identidad (Hito 4): tracker_id -> persistent_id
-                # (confirmado por rostro) o id provisional. Va DESPUES de la
-                # demografia (que es quien mapea el rostro a la galeria) y ANTES
-                # de entrada/salida, segun el orden del plan. Se le pasa el
-                # frame para el Re-ID corporal (Hito 9): enrolar/matchear cuerpo.
-                self._resolve_track_identities(inference_image)
+                    # Resolucion de identidad (Hito 4): tracker_id -> persistent_id
+                    # (confirmado por rostro) o id provisional. Va DESPUES de la
+                    # demografia (que es quien mapea el rostro a la galeria) y ANTES
+                    # de entrada/salida, segun el orden del plan. Se le pasa el
+                    # frame para el Re-ID corporal (Hito 9): enrolar/matchear cuerpo.
+                    self._resolve_track_identities(inference_image)
 
-                # Personal por el UNIFORME (16-oct-2026,
-                # `clasificador_uniforme.py`). En «sombra» solo apunta en
-                # output/uniforme_sombra/ quién parece personal; en «activo»
-                # además le pone `es_personal` (la marca del personal dado de
-                # alta). Sin su modelo en models/ no hace nada.
-                for _tid_u in clasificador_uniforme.observar(
+                    # Personal por el UNIFORME (16-oct-2026,
+                    # `clasificador_uniforme.py`). En «sombra» solo apunta en
+                    # output/uniforme_sombra/ quién parece personal; en «activo»
+                    # además le pone `es_personal` (la marca del personal dado de
+                    # alta). Sin su modelo en models/ no hace nada.
+                    for _tid_u in clasificador_uniforme.observar(
+                            camera_id, inference_image, self.active_tracks,
+                            self.frame_counter,
+                            self._imagenes(int(AnalyticsConfig.PERSONAL_UNIFORME_CADA)),
+                            getattr(self, '_capture_meta', None)):
+                        # Pudo contarse como visitante y tener ficha antes del
+                        # tercer voto: se le quita todo (`personal_descuento.py`).
+                        personal_descuento.descontar(self, _tid_u, camera_id)
+
+                    # Entradas/salidas POR PERSONA (Hito 5): maquina FUERA/DENTRO
+                    # por persistent_id con anti-rebote -> visitantes unicos del
+                    # area + entradas/salidas exactas (no infladas).
+                    self._process_zone_transitions()
+                    # Unir seguimientos cortados, EN SOMBRA (20-oct-2026,
+                    # `costura_sombra.py`): solo apunta lo que uniría.
+                    # Huella inmediata de la costura (26-oct-2026): con el MISMO
+                    # OSNet del reidentificador corporal.
+                    _body_c = getattr(self, '_body_reidentifier', None)
+                    if _body_c is not None and getattr(_body_c, 'is_available', False):
+                        costura_sombra.poner_huella(_body_c.compute_embedding)
+                    for _tid_a, _tid_b in costura_sombra.observar(
+                            camera_id, inference_image, self.active_tracks,
+                            self.frame_counter):
+                        # Unido de verdad (modo activo): si el anterior ya tenía
+                        # ficha, el nuevo no abre otra.
+                        if (_tid_a in getattr(self, '_captured_ids', ())
+                                or _tid_a in (getattr(self, '_capture_meta', None) or {})):
+                            self._captured_ids.add(_tid_b)
+                    _conf, _deshechos = costura_sombra.resueltos(camera_id)
+                    for _tid_p in _conf:
+                        # Heredó la marca de PERSONAL y sus votos la confirmaron:
+                        # la misma limpieza que si lo marcara el uniforme. Sin
+                        # esto (22-oct, 12:41:22 en vivo) el número nuevo abría
+                        # ficha de cliente y la conservaba.
+                        personal_descuento.tras_costura(self, _tid_p, camera_id)
+                    for _tid_d in _deshechos:
+                        # Unión deshecha (era otra persona): que abra su ficha.
+                        getattr(self, '_captured_ids', set()).discard(_tid_d)
+                    # Revisar el género de quien se cruzó con otro, EN SOMBRA
+                    # (22-oct-2026, `revision_cruces.py`): solo apunta.
+                    revision_cruces.observar(
                         camera_id, inference_image, self.active_tracks,
-                        self.frame_counter,
-                        self._imagenes(int(AnalyticsConfig.PERSONAL_UNIFORME_CADA)),
-                        getattr(self, '_capture_meta', None)):
-                    # Pudo contarse como visitante y tener ficha antes del
-                    # tercer voto: se le quita todo (`personal_descuento.py`).
-                    personal_descuento.descontar(self, _tid_u, camera_id)
-
-                # Entradas/salidas POR PERSONA (Hito 5): maquina FUERA/DENTRO
-                # por persistent_id con anti-rebote -> visitantes unicos del
-                # area + entradas/salidas exactas (no infladas).
-                self._process_zone_transitions()
-                # Unir seguimientos cortados, EN SOMBRA (20-oct-2026,
-                # `costura_sombra.py`): solo apunta lo que uniría.
-                # Huella inmediata de la costura (26-oct-2026): con el MISMO
-                # OSNet del reidentificador corporal.
-                _body_c = getattr(self, '_body_reidentifier', None)
-                if _body_c is not None and getattr(_body_c, 'is_available', False):
-                    costura_sombra.poner_huella(_body_c.compute_embedding)
-                for _tid_a, _tid_b in costura_sombra.observar(
-                        camera_id, inference_image, self.active_tracks,
-                        self.frame_counter):
-                    # Unido de verdad (modo activo): si el anterior ya tenía
-                    # ficha, el nuevo no abre otra.
-                    if (_tid_a in getattr(self, '_captured_ids', ())
-                            or _tid_a in (getattr(self, '_capture_meta', None) or {})):
-                        self._captured_ids.add(_tid_b)
-                _conf, _deshechos = costura_sombra.resueltos(camera_id)
-                for _tid_p in _conf:
-                    # Heredó la marca de PERSONAL y sus votos la confirmaron:
-                    # la misma limpieza que si lo marcara el uniforme. Sin
-                    # esto (22-oct, 12:41:22 en vivo) el número nuevo abría
-                    # ficha de cliente y la conservaba.
-                    personal_descuento.tras_costura(self, _tid_p, camera_id)
-                for _tid_d in _deshechos:
-                    # Unión deshecha (era otra persona): que abra su ficha.
-                    getattr(self, '_captured_ids', set()).discard(_tid_d)
-                # Revisar el género de quien se cruzó con otro, EN SOMBRA
-                # (22-oct-2026, `revision_cruces.py`): solo apunta.
-                revision_cruces.observar(
-                    camera_id, inference_image, self.active_tracks,
-                    getattr(self, '_demographics', None),
-                    getattr(self, '_capture_meta', None), self.frame_counter)
-                # Reparto del calor diferido (22-oct-2026): ya se sabe quién
-                # es personal (uniforme, costura) en esta imagen.
-                if (AnalyticsConfig.HEATMAP_ENABLED
-                        and getattr(self, '_heatmap', None) is not None):
-                    calor_diferido.de(camera_id).repartir(
-                        self.active_tracks, self._heatmap,
-                        lambda: personal_mapa.mapa(camera_id, getattr(
-                            self, '_camera_display_name', None)),
-                        personal_mapa.es_de_camiseta)
-                # Permanencia PROPIA del personal de camiseta (19-oct-2026).
-                personal_mapa.permanencia(camera_id).observar(self.active_tracks)
+                        getattr(self, '_demographics', None),
+                        getattr(self, '_capture_meta', None), self.frame_counter)
+                    # Reparto del calor diferido (22-oct-2026): ya se sabe quién
+                    # es personal (uniforme, costura) en esta imagen.
+                    if (AnalyticsConfig.HEATMAP_ENABLED
+                            and getattr(self, '_heatmap', None) is not None):
+                        calor_diferido.de(camera_id).repartir(
+                            self.active_tracks, self._heatmap,
+                            lambda: personal_mapa.mapa(camera_id, getattr(
+                                self, '_camera_display_name', None)),
+                            personal_mapa.es_de_camiseta)
+                    # Permanencia PROPIA del personal de camiseta (19-oct-2026).
+                    personal_mapa.permanencia(camera_id).observar(self.active_tracks)
 
                 # Avisos de NEGOCIO (aforo alto, pasillo dormido, caida de
                 # trafico). Va DESPUES de las transiciones porque lee el aforo

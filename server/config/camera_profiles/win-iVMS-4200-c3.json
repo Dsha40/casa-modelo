@@ -1,8 +1,7 @@
 {
-  "_descripcion": "Camara 3 en vivo (pasillo de las baldas de cafe), capturada de la ventana de iVMS-4200. Sus pixeles NO son los del video de Media Player (otro tamano de imagen): por eso tiene su propio umbral.",
+  "_descripcion": "Casa modelo, cámara 3 (iVMS-4200). 2-nov-2026: solo permanencia y mapa de calor, a petición del usuario. La cámara de visitas es la recámara principal (c4).",
+  "_historia": "Hasta el 2-nov-2026 este perfil era el del pasillo del café del supermercado (descartaba a la gente de menos de 150 px de alto). Se quitó entero: era de otra cámara. Está en el historial de git.",
 
-  "_nota_fondo": "6-oct-2026: el usuario pidio descartar a la gente del FONDO con un umbral de 200 px de alto en esta imagen (el del video es 235). Se descarta justo despues del detector (filtro_fondo.py): no deja seguimiento, ficha, entrada, demografia, anaqueles ni calor. Sin medir aun con la regla quien queda justo por encima o por debajo. 9-oct-2026: subido a 220 px a peticion del usuario. 12-oct-2026: bajado a 150 px a peticion del usuario, ahora que el fondo que se cuela se quita con las areas a ignorar del recuadro (zonas_ignorar.py).",
-  "PERSON_MIN_HEIGHT_PX": 150,
-
-  "_nota_seguimiento": "7-oct-2026: se probo BYTETRACK_MATCH_THRESH 0.9 (en la grabacion del video cada numero duraba 10,6 s en vez de 2,1) y en vivo DOS PERSONAS QUE SE CRUZARON SIN ESTAR MUY CERCA SE INTERCAMBIARON EL NUMERO (lo vio el usuario a los pocos minutos). Quitado: vale el global, 0.8."
+  "_nota_solo_permanencia": "Solo detecta y sigue: sin clasificar, sin identidades, sin fichas, avisos ni visitas. Apunta cuánto se queda la gente (permanencia_cuarto.py) y su mapa de calor.",
+  "SOLO_PERMANENCIA": true
 }

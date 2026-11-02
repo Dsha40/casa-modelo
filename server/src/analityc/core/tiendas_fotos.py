@@ -34,6 +34,8 @@ import cv2
 import numpy as np
 
 from . import tienda_almacen as _almacen_tienda
+from . import origen_identidad
+from . import voto_identidad
 from .tienda_clasificaciones import EsperaDemografia
 from .analytics.config import AnalyticsConfig
 
@@ -93,8 +95,12 @@ class FotosMixin:
             cy = (float(box[1]) + float(box[3])) / 2.0
             cell = (int(cx / cell_w), int(cy / cell_h))
             if now - self._cell_last_capture.get(cell, 0.0) <= ddt:
-                self._captured_ids.add(tid)  # zona ya cubierta: no reintentar
-                continue
+                if not AnalyticsConfig.CAPTURE_UNA_POR_PERSONA:
+                    self._captured_ids.add(tid)  # zona ya cubierta: no reintentar
+                    continue
+                if not confirmado:
+                    continue        # se reintenta cuando tenga identidad
+                # Con identidad y sin foto todavía: la zona no la frena.
             stem = self._capture_detection(tid, frame, box)
             if stem and confirmado:
                 # Foto escrita con identidad conocida: sellar a la persona
@@ -603,7 +609,12 @@ class FotosMixin:
                     # como «sin identidad»; es un caso raro y se prefiere eso
                     # a borrar a ciegas.
                     continue
-                almacen.anotar_demografia(cam, puid, genero, edad)
+                # La mayoría de sus seguimientos, no el último
+                # (30-oct-2026, `voto_identidad.py`). Si nació fuera del ROI
+                # no es una visita: su fila no se crea (`origen_identidad`).
+                genero_persona = voto_identidad.votar(puid, stem, genero)
+                if origen_identidad.cuenta(puid):
+                    almacen.anotar_demografia(cam, puid, genero_persona, edad)
                 almacen.identificar_clasificacion(stem, puid)
                 self._completar_sidecar(stem, {'person_uuid': puid})
                 self._captured_persons.setdefault(puid, stem)
@@ -668,10 +679,21 @@ class FotosMixin:
             # que hace posible el desglose por pasillo, imposible hasta ahora
             # porque la captura solo llevaba el nombre visible de la ventana.
             _pid_demo = meta.get('person_uuid')
+            # Un solo género por persona: la mayoría de sus seguimientos
+            # (30-oct-2026, `voto_identidad.py`). Va a la visita y al aviso;
+            # la clasificación de abajo guarda el de ESTE seguimiento.
+            genero_persona = genero
+            # Nació fuera del ROI: alguien que volvió de un cuarto sin ser
+            # reconocido. No es una visita: ni fila de visita ni aviso
+            # (30-oct-2026, `origen_identidad.py`). Su clasificación de
+            # abajo sí se guarda.
+            es_visita = not _pid_demo or origen_identidad.cuenta(_pid_demo)
             if _pid_demo:
-                _almacen_tienda.get_almacen().anotar_demografia(
-                    getattr(self, '_camera_id_actual', '') or '',
-                    _pid_demo, genero, edad)
+                genero_persona = voto_identidad.votar(_pid_demo, stem, genero)
+                if es_visita:
+                    _almacen_tienda.get_almacen().anotar_demografia(
+                        getattr(self, '_camera_id_actual', '') or '',
+                        _pid_demo, genero_persona, edad)
             # Y SIEMPRE, tenga identidad o no (24-sep-2026): `anotar_demografia`
             # solo puede escribir a quien tiene identidad, y ese día 3 de 3
             # clasificados se quedaron fuera. Esta tabla los guarda a todos
@@ -680,10 +702,12 @@ class FotosMixin:
                 getattr(self, '_camera_id_actual', '') or '', stem,
                 genero, edad, person_uuid=_pid_demo,
                 solo_cuerpo=bool(meta.get('solo_cuerpo')))
+            if not es_visita:
+                return
 
             visitas = meta.get('visitas')
             recurrente = isinstance(visitas, int) and visitas > 1
-            desc = f"Visitante {genero}"
+            desc = f"Visitante {genero_persona}"
             if edad:
                 desc += f", {edad} años"
             desc += (f". Visita nº {visitas} (recurrente)." if recurrente
@@ -691,12 +715,12 @@ class FotosMixin:
 
             alerta = {
                 'event_type': 'Visitante',
-                'class_name': f"{genero} {edad}".strip(),
+                'class_name': f"{genero_persona} {edad}".strip(),
                 'description': desc,
                 'timestamp': self._capture_ts_epoch(meta.get('timestamp')),
                 'camera_name': str(
                     getattr(self, '_camera_display_name', '') or ''),
-                'gender': genero,
+                'gender': genero_persona,
                 'age_range': edad,
                 'visitas': visitas,
                 'person_uuid': meta.get('person_uuid'),

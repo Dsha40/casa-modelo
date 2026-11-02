@@ -44,6 +44,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 
 from .config import AnalyticsConfig
+from . import aprender_cara
 
 logger = logging.getLogger(__name__)
 
@@ -229,9 +230,14 @@ class FaceReidentifier:
         self._cam_ns: Dict[str, int] = {}
         # Timestamp del ultimo guardado (para reset diario)
         self._last_save_date: Optional[datetime.date] = None
-        # Throttle: no guardar mas de cada 5s
+        # Throttle: no guardar mas de cada REID_GUARDAR_CADA_S (5 s hasta el
+        # 30-oct-2026; con 24 h y 15 plantillas el pickle pesa más)
         self._last_disk_write: float = 0.0
-        self._disk_write_interval: float = 5.0
+        self._disk_write_interval: float = float(
+            getattr(AnalyticsConfig, 'REID_GUARDAR_CADA_S', 5.0))
+        #: track_id -> última vez que se intentó aprender su cara
+        #: (`aprender_cara.py`, 30-oct-2026).
+        self._aprendido_ts: Dict[int, float] = {}
         # mtime del pickle cuando lo leimos por ultima vez. Si el archivo
         # cambia externamente (ej. webapp borra una persona), detectamos
         # el cambio antes del proximo save y aplicamos la eliminacion en
@@ -626,14 +632,27 @@ class FaceReidentifier:
             (persistent_id, mejor_similitud). (None, -1.0) si la galeria
             esta vacia.
         """
-        best_uid: Optional[str] = None
-        best_sim: float = -1.0
+        # Una sola multiplicación de matriz (30-oct-2026). Antes, un bucle de
+        # Python con un coseno por plantilla: 100 personas 3,6 ms, 2 000 ->
+        # 67,6 ms (medido el 21-sep). Con 24 h y 15 plantillas por persona
+        # serían ~2 000 plantillas en cada búsqueda. Mismo resultado: la fila
+        # que gana es la primera con el máximo, en el orden de la galería,
+        # como el `>` estricto del bucle.
+        uids: List[str] = []
+        filas: List[np.ndarray] = []
         for uid, rec in self._db.items():
-            sim = _best_match_similarity(emb, rec)
-            if sim > best_sim:
-                best_sim = sim
-                best_uid = uid
-        return best_uid, best_sim
+            for e in _get_embeddings(rec):
+                uids.append(uid)
+                filas.append(np.asarray(e, dtype=np.float32).reshape(-1))
+        if not filas:
+            return None, -1.0
+        m = np.stack(filas)
+        m /= np.maximum(np.linalg.norm(m, axis=1, keepdims=True), 1e-9)
+        q = np.asarray(emb, dtype=np.float32).reshape(-1)
+        q = q / max(float(np.linalg.norm(q)), 1e-9)
+        sims = m @ q
+        i = int(np.argmax(sims))
+        return uids[i], float(sims[i])
 
     def search_gallery(self, embedding: np.ndarray,
                        threshold: Optional[float] = None,
@@ -703,6 +722,10 @@ class FaceReidentifier:
                     self._maybe_update_demographics(
                         rec, gender, age_range, age_value, demo_confidence
                     )
+                    # Aprender su cara durante la visita (30-oct-2026): hasta
+                    # entonces esta rama no guardaba ninguna plantilla.
+                    aprender_cara.aprender_en_visita(
+                        self, track_id, rec, face_bgr, face_yaw, face_pitch)
                     return uid, False, dict(rec)
 
         # Calcular embedding

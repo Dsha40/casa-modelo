@@ -274,10 +274,12 @@ def test_un_pickle_viejo_en_disco_no_vacia_la_galeria_en_ram(db_path):
 @pytest.mark.skipif(
     'ELDE_REID_RESET_POLICY' in os.environ or 'ELDE_REID_TTL_S' in os.environ,
     reason='el entorno sobreescribe la politica; aqui se fija el DEFECTO')
-def test_el_defecto_es_ttl_de_treinta_minutos():
+def test_el_defecto_es_ttl_de_24_horas():
+    """30 min hasta el 30-oct-2026; 24 h desde entonces (rama contructora,
+    pedido por el usuario). Ver `test_identidad_24h.py`."""
     from src.analityc.core.analytics.config import AnalyticsConfig
     assert AnalyticsConfig.REID_RESET_POLICY == 'ttl'
-    assert AnalyticsConfig.REID_TTL_S == 1800.0
+    assert AnalyticsConfig.REID_TTL_S == 86400.0
 
 
 def test_la_firma_admite_los_parametros_que_pasa_tiendas():

@@ -244,6 +244,16 @@ app.include_router(api_tienda_router)
 from .api_en_vivo import router as api_en_vivo_router  # noqa: E402
 app.include_router(api_en_vivo_router)
 
+# La última imagen analizada con el ROI y las identidades pintadas
+# (30-oct-2026, `api_imagen_actual.py`): para diagnosticar en modo Tiendas.
+from .api_imagen_actual import router as api_imagen_actual_router  # noqa: E402
+app.include_router(api_imagen_actual_router)
+
+# Permanencia por cuarto de las cámaras de solo permanencia (30-oct-2026,
+# `api_permanencia_cuartos.py`).
+from .api_permanencia_cuartos import router as api_permanencia_cuartos_router  # noqa: E402
+app.include_router(api_permanencia_cuartos_router)
+
 # Parar y reanudar el grabador de personas sin reiniciar (2-nov-2026,
 # `api_grabador_personas.py`).
 from .api_grabador_personas import router as api_grabador_personas_router  # noqa: E402

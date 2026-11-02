@@ -278,6 +278,9 @@ class PermanenciaArea(TiendasProcess):
         # que decide si una persona sin rostro confirmado llega siquiera a
         # existir para el cronómetro.
         self._zone_requiere_confirmado = not bool(cfg['contar_sin_rostro'])
+        # Este modo cronometra SU zona: no la imagen entera
+        # (PERMANENCIA_TODA_LA_IMAGEN de Tiendas, 30-oct-2026).
+        self._zona_toda_la_imagen = False
 
         carpeta = Path(cfg['carpeta_evidencia'])
         if not carpeta.is_absolute():

@@ -286,7 +286,20 @@ class AnalyticsConfig:
     # Maximo de embeddings guardados por persona. Almacenar varios
     # capturando distintos angulos/expresiones permite matchear a la
     # misma persona aun cuando cambia de pose dramaticamente.
-    REID_MAX_EMBEDDINGS_PER_PERSON: int = 5
+    # 5 -> 15 el 30-oct-2026: desde ese día la galería también aprende
+    # durante la visita (`aprender_cara.py`), no solo al reconocer.
+    REID_MAX_EMBEDDINGS_PER_PERSON: int = 15
+    # Aprender la cara DURANTE la visita (30-oct-2026, `aprender_cara.py`):
+    # hasta entonces, una vez que un seguimiento tenía identidad, sus caras
+    # siguientes no se guardaban. Como mucho una plantilla por seguimiento y
+    # por REID_APRENDER_CADA_S, con pose de registro, y solo si se parece a
+    # las que ya tiene por encima de REID_APRENDER_SIM_MIN (si el número
+    # saltó a otra persona, no se mezcla su cara). 0,40 es más estricto que
+    # el 0,35 de reconocer; elegido, sin calibrar: el log apunta cada
+    # parecido para revisarlo. ELDE_REID_APRENDER=0 lo apaga.
+    REID_APRENDER_EN_VISITA: bool = True
+    REID_APRENDER_CADA_S: float = 1.0
+    REID_APRENDER_SIM_MIN: float = 0.40
     # Yaw maximo PARA REGISTRAR una persona NUEVA. Mas estricto que el
     # yaw general permitido para clasificacion (DEMO_POSE_MAX_YAW_DEG).
     # Las caras de perfil generan embeddings que NO matchean con
@@ -330,7 +343,22 @@ class AnalyticsConfig:
     # personas del dia — quien vuelve dos horas despues es un persistent_id
     # nuevo y suma otra fila en `tienda_visitas`. Subirlo si se quiere unir
     # visitas mas separadas, a costa de galeria (y de coste por busqueda).
-    REID_TTL_S: float = float(os.getenv("ELDE_REID_TTL_S", "1800"))
+    #
+    # 30-oct-2026 (rama contructora): 1800 -> 86400 (24 h), lo pidió el
+    # usuario: pasa menos gente y se quiere reconocer a quien vuelve en el
+    # día. En la base, del 22 al 29-oct, iVMS dio 59-97 identidades por día y
+    # cámara: ~100-250 en la galería. La búsqueda ya no es el bucle de Python
+    # (ver `_best_in_gallery`), así que su coste no frena.
+    REID_TTL_S: float = float(os.getenv("ELDE_REID_TTL_S", "86400"))
+    # Con TTL, guardar también la galería en disco (30-oct-2026): con 24 h,
+    # un reinicio del servidor o del cliente olvidaría a todos. Cada persona
+    # se sigue borrando a las REID_TTL_S de verla por última vez, también del
+    # disco (el pickle se reescribe sin ella). False = solo en RAM, como antes.
+    REID_PERSISTIR_CON_TTL: bool = True
+    # Cada cuánto se reescribe el pickle, como mucho (antes, 5 s fijos). Con
+    # 15 plantillas por persona el pickle crece (~30 KB por persona); se
+    # escribe dentro de la imagen que lo dispara.
+    REID_GUARDAR_CADA_S: float = 30.0
     # Path persistente de la base de datos
     REID_DB_PATH: str = "output/person_db/persons.pkl"
     # Threshold de confianza demografica minima para almacenar en la DB.
@@ -350,14 +378,69 @@ class AnalyticsConfig:
     BODY_REID_MODEL: str = "models/osnet/osnet_x1_0_market1501.onnx"
     # Coseno minimo para considerar mismo cuerpo. ALTO: el cuerpo es menos
     # discriminativo que la cara (uniformes/ropa parecida dan ~0.8). Calibrar.
-    BODY_REID_SIMILARITY_THRESHOLD: float = 0.90
-    # Vida de un embedding corporal (seg). Default 4 h (sesion/dia).
-    BODY_REID_TTL_S: float = 14400.0
-    # Plantillas corporales por persona (multi-vista).
-    BODY_REID_MAX_EMB_PER_PERSON: int = 5
+    #
+    # 0,90 -> 0,80 el 30-oct-2026, y 0,70 (BODY_REID_UMBRAL_RECIENTE) si a
+    # esa persona se la vio hace menos de BODY_REID_VENTANA_RECIENTE_S
+    # (`identidad_cuerpo.buscar`). Simulado con 18 tramos de UNA persona en la
+    # cámara 4: con 0,90 nunca se reconocía (la misma persona se parecía a sí
+    # misma 0,42-0,88) y salían 11 identidades o más; con esto, 2. Sin medir:
+    # si junta a dos personas distintas con ropa parecida.
+    BODY_REID_SIMILARITY_THRESHOLD: float = 0.80
+    BODY_REID_UMBRAL_RECIENTE: float = 0.70
+    BODY_REID_VENTANA_RECIENTE_S: float = 600.0
+    # Vida de un embedding corporal (seg). 4 h hasta el 30-oct-2026; 24 h
+    # desde que el cuerpo también crea identidades (`identidad_cuerpo.py`),
+    # como la cara. La ropa cambia de un día a otro: no más de 24 h.
+    BODY_REID_TTL_S: float = 86400.0
+    # Plantillas corporales por persona (multi-vista). 5 -> 10 el 30-oct-2026:
+    # con la huella más seguida (abajo) hay más vistas que guardar.
+    BODY_REID_MAX_EMB_PER_PERSON: int = 10
     # Throttle: cada cuantos frames por track se calcula el embedding corporal
-    # (OSNet ~5-10ms; no en cada frame por cada persona).
-    BODY_REID_EVERY_N: int = 12
+    # (OSNet ~5-10ms; no en cada frame por cada persona). 12 -> 6 imágenes
+    # REALES el 30-oct-2026 (BODY_REID_CADENCIA_EN_IMAGENES): antes, 12 a 7,7
+    # fps en tiempo real, que a 17 fps eran 27 imágenes (~1,6 s).
+    BODY_REID_EVERY_N: int = 6
+    # True = BODY_REID_EVERY_N cuenta imágenes reales; False = tiempo real a
+    # 7,7 fps, como antes del 30-oct-2026.
+    BODY_REID_CADENCIA_EN_IMAGENES: bool = True
+    # Identidad por el CUERPO cuando no se ve la cara (30-oct-2026,
+    # `identidad_cuerpo.py`): en la cámara 4 la cara casi nunca sirve y cada
+    # entrada contaba como otra persona. Con BODY_ID_MIN_HUELLAS huellas del
+    # mismo seguimiento que se parecen entre sí (coseno mínimo entre pares ≥
+    # BODY_ID_COHERENCIA_MIN), el cuerpo crea una identidad. Los dos números
+    # son elegidos, sin calibrar: el log escribe `CUERPO ID` cada 60 s.
+    # ELDE_BODY_ID=0 lo apaga.
+    BODY_ID_CREAR: bool = True
+    # Solo cuentan como VISITA (entradas/salidas, únicos, aviso de
+    # «visitante») las identidades que nacieron dentro del ROI (30-oct-2026,
+    # `origen_identidad.py`): quien vuelve de un cuarto que la cámara no ve
+    # y no es reconocido recibe otra identidad, pero no es otra visita.
+    # ELDE_VISITAS_SOLO_ROI=0 lo apaga.
+    VISITAS_SOLO_NACIDAS_EN_ROI: bool = True
+    # ¿Se TIRAN las personas cuyo centro cae fuera del ROI antes de
+    # seguirlas? (`tiendas.py`, «Filtro ROI»). True hasta el 30-oct-2026:
+    # en la casa modelo, quien pasaba del ROI (la entrada) al resto de la casa
+    # dejaba de seguirse y de clasificarse, y al volver al ROI desde dentro
+    # contaba como persona y visita nuevas. False = se sigue a todos en toda
+    # la imagen; el ROI solo cuenta entradas y decide qué es visita.
+    ROI_FILTRA_DETECCIONES: bool = False
+    # Permanencia y entradas/salidas de cada persona en TODA la imagen, no
+    # solo dentro del ROI (30-oct-2026, el usuario: con el ROI sobre la
+    # entrada medía el tiempo en la entrada, no en la casa). Entrada = se le
+    # empieza a ver; salida = se le deja de ver. El ROI solo decide quién es
+    # visita (`origen_identidad`). False = DENTRO es el ROI, como antes.
+    PERMANENCIA_TODA_LA_IMAGEN: bool = True
+    # Calentar las sesiones ONNX al crear el procesador (30-oct-2026,
+    # `calentar_modelos.py`): la primera persona tras arrancar congelaba el
+    # servidor ~20-25 s. ELDE_CALENTAR=0 lo apaga.
+    CALENTAR_MODELOS: bool = True
+    # Cámara de SOLO PERMANENCIA (30-oct-2026, `permanencia_cuarto.py`): se
+    # pone a true en el perfil de la cámara (config/camera_profiles/). Solo
+    # detecta y sigue: sin clasificar, sin identidades, sin fichas, avisos ni
+    # visitas. Apunta cuánto se queda la gente en ese cuarto.
+    SOLO_PERMANENCIA: bool = False
+    BODY_ID_MIN_HUELLAS: int = 3
+    BODY_ID_COHERENCIA_MIN: float = 0.80
     # Altura minima (px) del recorte de persona para usarlo (evita cuerpos
     # diminutos/lejanos que dan embeddings basura).
     BODY_REID_MIN_CROP_H: int = 96
@@ -420,6 +503,10 @@ class AnalyticsConfig:
     # la foto de la ficha. Medido en dos exámenes limpios (23 y 26-oct): de
     # 60 % a 87 % de gente con género al mismo 93,4 %. ELDE_GENERO_V2=0 apaga.
     GENERO_V2: bool = True
+    # La parte de 2ª opinión («Hombre» -> «Mujer») APAGADA desde el
+    # 30-oct-2026: en la casa modelo cambió mal a un hombre (0,992). Las
+    # indecisas sigue decidiéndolas. ELDE_GENERO_V2_SEGUNDA=1 la enciende.
+    GENERO_V2_SEGUNDA_OPINION: bool = False
     # Filtro de forma (alto/ancho del perfil de ángulo) SIN aplicar a las cajas
     # que tocan el borde de ABAJO de la imagen (26-oct-2026): ahí la gente está
     # pegada a la cámara y cortada (agachada en la balda baja), no es una caja
@@ -655,6 +742,15 @@ class AnalyticsConfig:
     # persona quieta a la que el tracker le cambia el id (churn de BoT-SORT).
     # Funciona aunque no haya rostro. Subir los segundos = menos fotos repetidas.
     CAPTURE_DEDUP_SECONDS: float = 60.0
+    # Una foto POR PERSONA, no por zona (2-nov-2026, casa modelo): en la
+    # recámara todos entran por la misma puerta y el dedup espacial dejaba
+    # sin foto a quien entraba detrás en el mismo minuto (sábado 31-oct: 5 de
+    # 7 visitas sin foto, con otra foto de c4 10-40 s antes). Con True, quien
+    # tiene identidad confirmada se fotografía aunque la zona esté cubierta
+    # (una vez por identidad, `_captured_persons`), y quien aún no la tiene
+    # se reintenta en las imágenes siguientes en vez de descartarse. El
+    # dedup espacial sigue para quien nunca recibe identidad. False = antes.
+    CAPTURE_UNA_POR_PERSONA: bool = True
     # Grilla para el dedup espacial: la imagen se divide en COLSxROWS celdas y se
     # captura a lo sumo una persona por celda por ventana. Mas celdas = mas
     # granular (mas fotos); menos celdas = mas agrupacion (menos fotos).
@@ -753,6 +849,11 @@ class AnalyticsConfig:
     DEMO_CLASIFICADOR: str = "b"
     # Cadencia con el clasificador B: 5 imágenes a 7,7 fps (~0,65 s).
     DEMO_RECLASSIFY_EVERY_B: int = 5
+    # 30-oct-2026 (rama contructora): sin anaqueles ni pose el servidor va a
+    # ~17 fps, pero `_imagenes` mantenía el intento en ~0,65 s (12 imágenes a
+    # 17 fps): el tiempo ganado no se usaba para clasificar. True = cada 5
+    # imágenes REALES (~0,3 s a 17 fps). False = en tiempo real, como antes.
+    DEMO_CADENCIA_EN_IMAGENES: bool = True
     # Seguridad que exige el clasificador B para decidir (12-oct-2026): 90 %
     # si alguna lectura tuvo CARA (en vivo acertaba el 97 %), 95 % si solo
     # cuerpo (93 %). Antes, 95 % para todo. Ver `clasificador_b.py`.

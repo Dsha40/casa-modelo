@@ -20,7 +20,8 @@ clientes. Si no está, esto no hace nada.
 Cuando una ficha de cliente lleva `ESPERA_S` sin cambiar (ya pasó la espera
 de 5 min a la identidad o el género tardíos):
 
-- el sistema dijo «Hombre» y el v2 dice «Mujer» con >= `U_SEGUNDA`: Mujer;
+- el sistema dijo «Hombre» y el v2 dice «Mujer» con >= `U_SEGUNDA`: Mujer
+  (APAGADO desde el 30-oct-2026, ver `segunda_opinion`);
 - el sistema no decidió y el v2 está seguro (>= `U_INDECISA` hacia un lado):
   ese género.
 
@@ -76,9 +77,30 @@ def activo() -> bool:
         return True
 
 
+def segunda_opinion() -> bool:
+    """¿Puede el v2 cambiar un «Hombre» del sistema a «Mujer»?
+
+    APAGADO desde el 30-oct-2026 (rama contructora, lo eligió el usuario):
+    en la casa modelo, cámara 4, cambió a «Mujer» con 0,992 a un hombre de
+    camisa verde que el sistema había clasificado bien (13:15). El 96,3 % de
+    la tabla de arriba es del supermercado; aquí no está medido. Sigue
+    decidiendo las indecisas. `ELDE_GENERO_V2_SEGUNDA=1` (o
+    `AnalyticsConfig.GENERO_V2_SEGUNDA_OPINION = True`) lo vuelve a encender.
+    """
+    v = os.environ.get('ELDE_GENERO_V2_SEGUNDA')
+    if v is not None:
+        return v.strip().lower() not in ('0', 'false', 'no', 'off', '')
+    try:
+        from .analytics.config import AnalyticsConfig
+        return bool(getattr(AnalyticsConfig, 'GENERO_V2_SEGUNDA_OPINION',
+                            False))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 def decidir(genero: Optional[str], p_mujer: float) -> Optional[str]:
     """El género que debe quedar en la ficha, o None si no cambia."""
-    if genero == 'Hombre' and p_mujer >= U_SEGUNDA:
+    if genero == 'Hombre' and p_mujer >= U_SEGUNDA and segunda_opinion():
         return 'Mujer'
     if genero in (None, '', 'Desconocido'):
         if p_mujer >= U_INDECISA:
@@ -105,6 +127,26 @@ class _Modelo:
         with self._torch.no_grad():
             t = self._torch.from_numpy(np.ascontiguousarray(x))[None].to(self.disp)
             return float(self._torch.sigmoid(self.net(t))[0, 0])
+
+
+def hace_falta(meta: dict) -> bool:
+    """¿Sirve de algo pasarle el modelo a esta ficha? (30-oct-2026)
+
+    Antes se revisaban TODAS. El usuario: si no es una visita, es cómputo
+    perdido. Solo se revisa si su identidad cuenta como visita (nació
+    dentro del ROI, `origen_identidad`) y si el resultado puede cambiar algo:
+    género sin decidir o, con la segunda opinión encendida, «Hombre». Así,
+    además, no se escribe la visita de quien nació fuera (pasó con
+    `7a846898` a las 14:04).
+    """
+    from . import origen_identidad
+    puid = meta.get('person_uuid')
+    if not puid or not origen_identidad.cuenta(puid):
+        return False
+    genero = meta.get('gender')
+    if genero in (None, '', 'Desconocido'):
+        return True
+    return genero == 'Hombre' and segunda_opinion()
 
 
 class Revisor:
@@ -135,7 +177,7 @@ class Revisor:
             except (OSError, ValueError):
                 continue
             self._vistas.add(nom)
-            if 'genero_v2' in meta:
+            if 'genero_v2' in meta or not hace_falta(meta):
                 continue
             img = cv2.imread(e.path[:-5] + '.jpg')
             if img is None or img.size == 0:
@@ -185,7 +227,11 @@ def aplicar_uno(carpeta: Path, stem: str, p: float, almacen: Any = None) -> Opti
         almacen.anotar_clasificacion(cam, stem, nuevo, edad, person_uuid=puid,
                                      solo_cuerpo=bool(meta.get('solo_cuerpo')))
         if puid:
-            almacen.anotar_demografia(cam, puid, nuevo, edad)
+            # Cambia el voto de ESTA ficha y la visita se queda con la
+            # mayoría de la persona (30-oct-2026, `voto_identidad.py`).
+            from . import voto_identidad
+            almacen.anotar_demografia(
+                cam, puid, voto_identidad.votar(puid, stem, nuevo), edad)
     return nuevo
 
 
